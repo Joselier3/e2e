@@ -2,4 +2,4 @@
 "e2e": patch
 ---
 
-`e2e init` lists **Skip for now** second in the model prompt, right below the default, and says no API key is needed during setup. The Vercel AI Gateway and OpenRouter hints say the key is read from your environment. `--gateway none` is unchanged.
+`e2e init` renames the no-model option from **None** to **Skip for now**, says no API key is needed during setup, shortens the Vercel AI Gateway and OpenRouter hints to note they read from your environment, and labels OpenAI-compatible endpoints as `OpenAI-compatible / local endpoint`. `--gateway none` is unchanged.

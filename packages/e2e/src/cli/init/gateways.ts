@@ -33,7 +33,7 @@ export const GATEWAYS: readonly GatewayPreset[] = [
   {
     id: 'vercel',
     label: 'Vercel AI Gateway',
-    hint: 'one key for every provider; read from AI_GATEWAY_API_KEY in your env',
+    hint: 'uses AI_GATEWAY_API_KEY from your env',
     dependencies: {},
     import: "import { gateway } from 'ai';",
     comment: 'The Vercel AI Gateway serves the model id and reads AI_GATEWAY_API_KEY, or the OIDC token of a linked Vercel project.',
@@ -43,7 +43,7 @@ export const GATEWAYS: readonly GatewayPreset[] = [
   {
     id: 'openrouter',
     label: 'OpenRouter',
-    hint: 'one key for every provider; read from OPENROUTER_API_KEY in your env',
+    hint: 'uses OPENROUTER_API_KEY from your env',
     dependencies: { '@openrouter/ai-sdk-provider': '^3.0.0' },
     import: "import { openrouter } from '@openrouter/ai-sdk-provider';",
     comment: 'OpenRouter serves the model id and reads OPENROUTER_API_KEY.',

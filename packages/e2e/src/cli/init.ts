@@ -297,11 +297,10 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     const gateway = given.gateway ?? await clack.select<GatewayChoice>({
       message: 'Which model for agent steps? No API key needed during setup.',
       initialValue: DEFAULT_GATEWAY,
-      // Skip sits right below the default, where people who keep their key to themselves see it.
-      options: GATEWAYS.flatMap(({ id, label, hint }) => [
-        { value: id, label, hint },
-        ...(id === DEFAULT_GATEWAY ? [{ value: 'none' as const, label: 'Skip for now', hint: 'deterministic tests only; add a model later' }] : []),
-      ]),
+      options: [
+        ...GATEWAYS.map(({ id, label, hint }) => ({ value: id, label, hint })),
+        { value: 'none', label: 'Skip for now', hint: 'deterministic tests only; add a model later' },
+      ],
     });
     if (isCancelled(gateway)) return cancel();
     if (gateway === 'openai-compatible') {

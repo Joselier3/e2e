@@ -326,13 +326,13 @@ describe('e2e init', () => {
       initialValue: 'vercel',
       options: [
         expect.objectContaining({ value: 'vercel', label: 'Vercel AI Gateway' }),
-        expect.objectContaining({ value: 'none', label: 'Skip for now' }),
         expect.objectContaining({ value: 'openrouter' }),
         expect.objectContaining({ value: 'openai-compatible', label: 'OpenAI-compatible / local endpoint' }),
         expect.objectContaining({ value: 'chatgpt' }),
         expect.objectContaining({ value: 'copilot' }),
         expect.objectContaining({ value: 'opencode-console' }),
         expect.objectContaining({ value: 'grok' }),
+        expect.objectContaining({ value: 'none', label: 'Skip for now' }),
       ],
     }));
     expect(clack.text).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ placeholder: 'http://127.0.0.1:11434/v1' }));
