@@ -6,6 +6,7 @@
  * numbered from 1, and both are absent when there are none.
  */
 
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,17 +31,17 @@ export function assertValidCtrf(document: unknown): void {
     validator = ajv.compile(JSON.parse(readFileSync(SCHEMA_PATH, 'utf8')) as Record<string, unknown>);
   }
   if (!validator(document)) {
-    throw new Error(`CTRF schema violation:\n${JSON.stringify(validator.errors, null, 2)}`);
+    assert.fail(`CTRF schema violation:\n${JSON.stringify(validator.errors, null, 2)}`);
   }
   for (const test of (document as { results: { tests: CtrfTestShape[] } }).results.tests) {
     const attempts = test.retryAttempts;
     if ((test.retries ?? 0) === 0) {
-      if (attempts !== undefined) throw new Error(`${test.name}: retryAttempts without retries`);
+      if (attempts !== undefined) assert.fail(`${test.name}: retryAttempts without retries`);
       continue;
     }
-    if (attempts === undefined || attempts.length !== test.retries) throw new Error(`${test.name}: retries ${test.retries} but ${attempts?.length ?? 0} retryAttempts`);
+    if (attempts === undefined || attempts.length !== test.retries) assert.fail(`${test.name}: retries ${test.retries} but ${attempts?.length ?? 0} retryAttempts`);
     attempts.forEach((attempt, index) => {
-      if (attempt.attempt !== index + 1) throw new Error(`${test.name}: retry attempt ${index} is numbered ${attempt.attempt}`);
+      if (attempt.attempt !== index + 1) assert.fail(`${test.name}: retry attempt ${index} is numbered ${attempt.attempt}`);
     });
   }
 }
