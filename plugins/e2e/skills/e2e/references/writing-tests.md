@@ -548,7 +548,8 @@ test as close to its screen as the app allows:
 - Create the data the screen needs through the app's API in a `test.extend`
   fixture. Click through a creation flow only in the test that covers it.
   A declared session is restored before fixtures run, so when the app signs
-  in with a cookie, `browser.cookies()` signs the fixture's requests in.
+  in with a cookie, its session cookie from `browser.cookies()` signs the
+  fixture's requests in. Send only that cookie: the list holds every site's.
   Check the response in the fixture: a
   failed seed then fails there, not 30 s later on a locator. While exploring
   over MCP, a project tool that seeds data (topic `agent`) gets there in one
@@ -560,13 +561,15 @@ import { expect } from 'e2e';
 import { z } from 'zod';
 
 const projectTest = test.extend<{ project: { id: string } }>({
-  project: async ({ browser, request }, use) => {
-    const cookie = (await browser.cookies()).map((c) => `${c.name}=${c.value}`).join('; ');
-    const created = await request.post('/api/projects', { json: { name: `Project ${Date.now()}` }, headers: { cookie } });
+  project: async ({ app, browser, request }, use) => {
+    const { hostname } = new URL(app.baseUrl);
+    const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === hostname);
+    const headers = { cookie: `session=${session?.value ?? ''}` };
+    const created = await request.post('/api/projects', { json: { name: `Project ${Date.now()}` }, headers });
     expect(created).toBeOK();
     const project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));
     await use(project);
-    await request.delete(`/api/projects/${project.id}`, { headers: { cookie } }); // runs after a failure too
+    await request.delete(`/api/projects/${project.id}`, { headers }); // runs after a failure too
   },
 });
 
@@ -701,8 +704,9 @@ them. A predicate function is `INVALID_ARGUMENT`.
   cleanup, so replays and retries never trip over leftovers.
 - APIs live in the same suite: `request.get('/api/users')` (each call a
   step, a path against the app URL), `expect(response).toBeOK()`, and the
-  value matchers. `request` sends no browser cookies: pass
-  `browser.cookies()` in a `cookie` header when the API needs the session.
+  value matchers. `request` sends no browser cookies: pass the app's
+  session cookie from `browser.cookies()` in a `cookie` header when the API
+  needs the session.
 - No sleeps, fixed delays, or polling loops. Wait for the state, not a
   duration: `agent.waitFor('the import finished')` with a `timeout` long
   enough for the slowest case (topic `agent` lists its model and budget

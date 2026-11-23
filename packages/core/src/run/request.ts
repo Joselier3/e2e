@@ -17,9 +17,9 @@ export interface RequestWiring {
 /** Builds the `request` fixture over one attempt. */
 export function createRequest(wiring: RequestWiring): APIRequest {
   const call = (method: string) => (url: string, options?: APIRequestOptions) =>
-    send(wiring, `request.${method.toLowerCase()}`, method, url, options);
+    send(wiring, `request.${method.toLowerCase()}`, () => method, url, options);
   return {
-    fetch: (url, options) => send(wiring, 'request.fetch', methodOf(options), url, options),
+    fetch: (url, options) => send(wiring, 'request.fetch', () => methodOf(options), url, options),
     get: call('GET'),
     post: call('POST'),
     put: call('PUT'),
@@ -29,20 +29,26 @@ export function createRequest(wiring: RequestWiring): APIRequest {
   };
 }
 
-/** Sends one request inside a `resource` step and returns its buffered response. */
+/** One call, checked before it is sent: what goes out and its step label, or why it cannot. */
+type Prepared = { readonly url: URL; readonly init: RequestInit; readonly label: string } | { readonly refused: unknown };
+
+/**
+ * Sends one request inside a `resource` step and returns its buffered
+ * response. A call its arguments refuse still opens the step, unlabeled so
+ * nothing it was given is shown, and rejects inside it.
+ */
 function send(
   wiring: RequestWiring,
   api: string,
-  method: string,
+  readMethod: () => string,
   input: unknown,
   options: APIRequestOptions | undefined,
 ): Promise<APIResponse> {
   const { environment } = wiring;
-  const base = environment.target.app.base;
-  const url = requestUrl(input, base);
-  const init = requestInit(method, options);
-  const label = `${method} ${shownUrl(url, base)}`;
-  return environment.steps.run('resource', api, label, () => {
+  const prepared = prepare(readMethod, input, options, environment.target.app.base);
+  return environment.steps.run('resource', api, 'label' in prepared ? prepared.label : '', () => {
+    if ('refused' in prepared) return Promise.reject(prepared.refused);
+    const { url, init, label } = prepared;
     const timeoutMs = wiring.actionTimeout();
     const { signal } = environment.budget;
     return withAbort(
@@ -56,6 +62,17 @@ function send(
       () => new TestError('CANCELLED', `${label} cancelled`),
     );
   });
+}
+
+/** Checks the method, URL, and options of one call. */
+function prepare(readMethod: () => string, input: unknown, options: APIRequestOptions | undefined, base: NormalizedBaseUrl | undefined): Prepared {
+  try {
+    const method = readMethod();
+    const url = requestUrl(input, base);
+    return { url, init: requestInit(method, options), label: `${method} ${shownUrl(url, base)}` };
+  } catch (refused) {
+    return { refused };
+  }
 }
 
 /** The fetch and the body read, both under `signal`; a network failure is `ACTION_FAILED` naming the call. */
@@ -84,8 +101,15 @@ function methodOf(options: APIRequestFetchOptions | undefined): string {
   if (typeof method !== 'string' || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(method)) {
     throw new TestError('INVALID_ARGUMENT', 'request.fetch: method must be an HTTP method name, such as "GET"');
   }
-  return method.toUpperCase();
+  const upper = method.toUpperCase();
+  if (UNSENDABLE_METHODS.has(upper)) {
+    throw new TestError('INVALID_ARGUMENT', `request.fetch: ${upper} is not supported; CONNECT, TRACE, and TRACK cannot be sent`);
+  }
+  return upper;
 }
+
+/** The methods Node's fetch refuses to send. */
+const UNSENDABLE_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
 
 /**
  * The URL a call goes to: a path resolved against the app URL, or an
@@ -101,7 +125,17 @@ function requestUrl(input: unknown, base: NormalizedBaseUrl | undefined): URL {
       `request to "${input}" needs an app URL to resolve against; the target declares no app.url, so pass an absolute URL`,
     );
   }
-  const url = new URL(resolveNavigationUrl(input, base).url);
+  let parsed: URL;
+  try {
+    parsed = new URL(input, base?.href);
+  } catch {
+    // The input is not quoted: it may carry credentials.
+    throw new ConfigurationError('POLICY_DENIED', 'request: malformed URL');
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new TestError('INVALID_ARGUMENT', 'request: a URL must not contain credentials; send them in headers');
+  }
+  const url = new URL(resolveNavigationUrl(parsed.href, base).url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new ConfigurationError('POLICY_DENIED', `request: forbidden URL scheme: ${url.protocol}`);
   }
@@ -118,10 +152,19 @@ function requestInit(method: string, options: APIRequestOptions | undefined): Re
   if (options !== undefined && (typeof options !== 'object' || options === null)) {
     throw new TestError('INVALID_ARGUMENT', 'request: options must be an object');
   }
+  const given: unknown = options?.headers;
+  if (given !== undefined && (typeof given !== 'object' || given === null || Array.isArray(given))) {
+    throw new TestError('INVALID_ARGUMENT', 'request: headers must be an object of header names to string values');
+  }
   const headers = new Headers();
-  for (const [name, value] of Object.entries(options?.headers ?? {})) {
+  for (const [name, value] of Object.entries(given ?? {})) {
     if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be a string`);
-    headers.set(name, value);
+    try {
+      headers.set(name, value);
+    } catch {
+      // The value is not quoted: it may be a credential.
+      throw new TestError('INVALID_ARGUMENT', `request: header "${name}" has an invalid name or value`);
+    }
   }
   const body = requestBody(options, headers);
   if (body !== undefined && (method === 'GET' || method === 'HEAD')) {
@@ -140,7 +183,12 @@ function requestBody(options: APIRequestOptions | undefined, headers: Headers): 
     return raw;
   }
   if (json === undefined) return undefined;
-  const text = JSON.stringify(json);
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(json);
+  } catch {
+    text = undefined;
+  }
   if (typeof text !== 'string') throw new TestError('INVALID_ARGUMENT', 'request: json must be a JSON-serializable value');
   if (!headers.has('content-type')) headers.set('content-type', 'application/json');
   return text;
@@ -148,10 +196,8 @@ function requestBody(options: APIRequestOptions | undefined, headers: Headers): 
 
 /** A response whose body was read inside the call's step, with `toBeOK()` on `expect(response)`. */
 function apiResponse(response: Response, body: Uint8Array, label: string): APIResponse {
-  const headers: Record<string, string> = {};
-  for (const [name, value] of response.headers) {
-    if (name !== 'set-cookie') headers[name] = value;
-  }
+  // fromEntries defines each name as its own property, `__proto__` included.
+  const headers: Record<string, string> = Object.fromEntries([...response.headers].filter(([name]) => name !== 'set-cookie'));
   const cookies = response.headers.getSetCookie();
   if (cookies.length > 0) headers['set-cookie'] = cookies.join('\n');
   const text = (): string => new TextDecoder().decode(body);

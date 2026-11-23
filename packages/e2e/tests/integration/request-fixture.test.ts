@@ -45,6 +45,11 @@ async function startApi(): Promise<Api> {
       response.end('ok');
       return;
     }
+    if (url.pathname === '/api/proto') {
+      response.setHeader('__proto__', 'kept');
+      response.end('ok');
+      return;
+    }
     response.writeHead(404, 'Not Found');
     response.end('nope');
   });
@@ -77,6 +82,7 @@ test('creates an order', async ({ request }) => {
   expect(await created.json()).toEqual({ received: { sku: 'A1' }, contentType: 'application/json', query: '?ref=r1', auth: 'Bearer t' });
   const cookies = await request.get('/api/cookies');
   expect(cookies.headers['set-cookie']).toBe('a=1\\nb=2');
+  expect(Object.hasOwn((await request.get('/api/proto')).headers, '__proto__')).toBe(true);
   expect(await cookies.text()).toBe('ok');
   const missing = await request.fetch('/api/missing', { method: 'delete' });
   expect(missing.status).toBe(404);
@@ -104,6 +110,7 @@ test('keeps a soft toBeOK failure', async ({ request }) => {
     expect(created.attempts[0]!.steps.map(({ kind, api: name, label, status }) => ({ kind, api: name, label, status }))).toEqual([
       { kind: 'resource', api: 'request.post', label: 'POST /api/orders', status: 'passed' },
       { kind: 'resource', api: 'request.get', label: 'GET /api/cookies', status: 'passed' },
+      { kind: 'resource', api: 'request.get', label: 'GET /api/proto', status: 'passed' },
       { kind: 'resource', api: 'request.fetch', label: 'DELETE /api/missing', status: 'passed' },
     ]);
     const notOk = resultByTitle(outcome, 'fails toBeOK on a 404').attempts[0]!.error;
@@ -179,6 +186,8 @@ test('a blank page', async ({ request }) => {
 
   it('refuses a malformed call before sending it, and names a network failure', async () => {
     const closed = await freePort();
+    // Not a configured secret: nothing redacts it, so only the fixture keeps it out.
+    const PLACEHOLDER = 'unregistered-placeholder-5150';
     const file = `import { test } from 'e2e';
 
 test('a GET with a body', async ({ request }) => {
@@ -196,6 +205,31 @@ test('a method with a space', async ({ request }) => {
 test('a refused connection', async ({ request }) => {
   await request.get('http://127.0.0.1:${closed}/api/ok');
 });
+
+test('a refusal is a rejected promise and a failed step', async ({ request }) => {
+  const settled = await request.get('/api/ok', { body: 'raw' }).then(() => 'sent', (error: { code?: string }) => error.code);
+  if (settled !== 'INVALID_ARGUMENT') throw new Error('settled as ' + settled);
+});
+
+test('headers that are not an object', async ({ request }) => {
+  await request.get('/api/ok', { headers: 42 as never });
+});
+
+test('a header value with a line break', async ({ request }) => {
+  await request.get('/api/ok', { headers: { authorization: 'Bearer ${PLACEHOLDER}\\nx: y' } });
+});
+
+test('credentials in the URL', async ({ request }) => {
+  await request.get('http://user:${PLACEHOLDER}@127.0.0.1:${closed}/api/ok?token=${PLACEHOLDER}');
+});
+
+test('TRACE', async ({ request }) => {
+  await request.fetch('/api/ok', { method: 'trace' });
+});
+
+test('a bigint in json', async ({ request }) => {
+  await request.post('/api/orders', { json: { n: 1n } });
+});
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
     const errorOf = (title: string) => resultByTitle(outcome, title).attempts[0]!.error;
@@ -206,6 +240,17 @@ test('a refused connection', async ({ request }) => {
       code: 'ACTION_FAILED',
       message: expect.stringContaining(`GET http://127.0.0.1:${closed}/api/ok failed: connect ECONNREFUSED`),
     });
+    const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
+    expect(refusal.error, JSON.stringify(refusal.error)).toBeUndefined();
+    expect(refusal.steps.map(({ api: name, label, status, error }) => ({ api: name, label, status, code: error?.code }))).toEqual([
+      { api: 'request.get', label: '', status: 'failed', code: 'INVALID_ARGUMENT' },
+    ]);
+    expect(errorOf('headers that are not an object')?.code).toBe('INVALID_ARGUMENT');
+    expect(errorOf('a header value with a line break')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "authorization" has an invalid name or value' });
+    expect(errorOf('credentials in the URL')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: a URL must not contain credentials; send them in headers' });
+    expect(errorOf('TRACE')?.code).toBe('INVALID_ARGUMENT');
+    expect(errorOf('a bigint in json')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: json must be a JSON-serializable value' });
+    expect(JSON.stringify(outcome.report)).not.toContain(PLACEHOLDER);
   });
 
   it('is a test fixture, which a beforeAll hook cannot name', async () => {
@@ -218,7 +263,7 @@ test.beforeAll(async ({ request }) => {
 test('runs', async () => {});
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
-    expect(outcome.report.run.errors).toEqual([expect.objectContaining({ code: 'COLLECTION_ERROR', message: expect.stringContaining('"request"') })]);
+    expect(outcome.report.run.errors).toEqual([expect.objectContaining({ code: 'COLLECTION_ERROR', message: expect.stringContaining('beforeAll hook names "request", a test fixture on target "fake"') })]);
   });
 
   it('keeps a configured secret out of the step label and the failure', async () => {
