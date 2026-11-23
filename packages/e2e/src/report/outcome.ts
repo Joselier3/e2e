@@ -15,7 +15,6 @@ import type { ReportError, ReportResult, ReportSerialGroup, ReportStep } from '.
 
 type ReportArtifact = ReportResult['attempts'][number]['artifacts'][number];
 type ReportSerialAttempt = ReportSerialGroup['attempts'][number];
-type ReportSerialMember = ReportSerialAttempt['members'][number];
 
 /**
  * An artifact a test owns: one its own records name, or, for a serial member,
@@ -53,7 +52,7 @@ export interface AttemptView {
    * member gets the ones its own records name (a step's artifact ids, a step
    * as producer, its failure's screenshot and screen), then the group
    * attempt's that no member's records name, marked `shared`; never a
-   * sibling's.
+   * sibling's. Empty for a member the attempt never reached.
    */
   readonly owned: readonly OwnedArtifact[];
   /** What else failed after the error: a teardown hook, the engine's cleanup. */
@@ -77,6 +76,15 @@ export interface Outcome {
   readonly attempts: readonly AttemptView[];
   /** Attempts that did not pass before the final one; what a flaky pass cost. */
   readonly failedAttempts: number;
+}
+
+/**
+ * Whether a file for CI (JUnit, CTRF) lists the result: the run selected it,
+ * or a test filter left it out, which reads as a skip naming the filter.
+ * Other unselected results are report-only.
+ */
+export function listedInCi(result: ReportResult): boolean {
+  return result.selected !== false || result.skip?.filter !== undefined;
 }
 
 /** What a result that never ran an attempt reads as. */
@@ -121,11 +129,15 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
   const attempts = groups.get(result.serialGroupId)?.attempts ?? [];
   return attempts.map((attempt, index) => {
     const member = attempt.members.find((candidate) => candidate.testId === result.testId);
+    const ran = member !== undefined && memberRan(member);
     return {
       id: member?.id,
       startedAt: member?.startedAt,
-      ran: member !== undefined && memberRan(member),
-      owned: member === undefined ? [] : memberArtifacts(attempt, member),
+      ran,
+      // Worked out only when a reporter asks, so one that never reads it pays nothing.
+      get owned(): readonly OwnedArtifact[] {
+        return ran ? memberArtifacts(attempt, result.testId) : [];
+      },
       status: member?.status ?? attempt.status,
       durationMs: member?.durationMs ?? 0,
       // Older reports lack `cutRetry`; infer it from the attempt's status.
@@ -143,28 +155,50 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
   });
 }
 
-/** The artifact ids a member's own records name: its steps' artifacts, its steps as producers, its failure's evidence. */
-function namedBy(member: ReportSerialMember, artifacts: readonly ReportArtifact[]): Set<string> {
-  const steps = new Set(member.steps.map((step) => step.id));
-  const named = new Set(member.steps.flatMap((step) => step.artifacts));
-  for (const id of [member.failure?.screenshot, member.failure?.screen]) if (id !== undefined) named.add(id);
-  for (const artifact of artifacts) {
-    if (artifact.producer.kind === 'step' && steps.has(artifact.producer.stepId)) named.add(artifact.id);
+/** Which members name each artifact of a group attempt, by artifact id; worked out once per attempt. */
+const OWNERS = new WeakMap<ReportSerialAttempt, ReadonlyMap<string, ReadonlySet<string>>>();
+
+/**
+ * The test ids whose records name each artifact of a group attempt: a step's
+ * artifact ids, a step as the artifact's producer, a failure's screenshot
+ * and screen. An artifact no member names is the group's own.
+ */
+function ownersOf(attempt: ReportSerialAttempt): ReadonlyMap<string, ReadonlySet<string>> {
+  const cached = OWNERS.get(attempt);
+  if (cached !== undefined) return cached;
+  const owners = new Map<string, Set<string>>();
+  const name = (id: string, testId: string): void => {
+    const set = owners.get(id) ?? new Set<string>();
+    set.add(testId);
+    owners.set(id, set);
+  };
+  const stepOwner = new Map<string, string>();
+  for (const member of attempt.members) {
+    for (const step of member.steps) {
+      stepOwner.set(step.id, member.testId);
+      for (const id of step.artifacts) name(id, member.testId);
+    }
+    for (const id of [member.failure?.screenshot, member.failure?.screen]) if (id !== undefined) name(id, member.testId);
   }
-  return named;
+  for (const artifact of attempt.artifacts) {
+    const owner = artifact.producer.kind === 'step' ? stepOwner.get(artifact.producer.stepId) : undefined;
+    if (owner !== undefined) name(artifact.id, owner);
+  }
+  OWNERS.set(attempt, owners);
+  return owners;
 }
 
 /**
  * A member's own artifacts in a group attempt, then the ones no member's
  * records name. A sibling's failure screenshot is never a member's.
  */
-function memberArtifacts(attempt: ReportSerialAttempt, member: ReportSerialMember): OwnedArtifact[] {
-  const own = namedBy(member, attempt.artifacts);
-  const anyMember = new Set(attempt.members.flatMap((candidate) => [...namedBy(candidate, attempt.artifacts)]));
+function memberArtifacts(attempt: ReportSerialAttempt, testId: string): OwnedArtifact[] {
+  const owners = ownersOf(attempt);
   const owned: OwnedArtifact[] = [];
   for (const artifact of attempt.artifacts) {
-    if (own.has(artifact.id)) owned.push({ artifact, shared: false });
-    else if (!anyMember.has(artifact.id) && memberRan(member)) owned.push({ artifact, shared: true });
+    const named = owners.get(artifact.id);
+    if (named === undefined) owned.push({ artifact, shared: true });
+    else if (named.has(testId)) owned.push({ artifact, shared: false });
   }
   return owned;
 }

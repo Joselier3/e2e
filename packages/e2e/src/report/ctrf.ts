@@ -2,7 +2,8 @@
  * CTRF reporter: the report-1 document as `.e2e/ctrf.json`, in the Common
  * Test Report Format (https://ctrf.io), so any CTRF consumer reads e2e
  * results without knowing e2e. It reads the document only, as `junit` does:
- * no CI variables, no test source, no app output.
+ * no test source, no app output, and no CI variable but `CI_PROJECT_DIR`,
+ * which `junit` resolves artifact paths against too.
  */
 
 import path from 'node:path';
@@ -11,8 +12,9 @@ import { builtin } from './builtin-id.ts';
 import type { Reporter } from '../run-types.ts';
 import type { Report1Document, ReportError, ReportResult, ReportSerialGroup, ReportStep } from './build.ts';
 import { repeatSuffix } from './format.ts';
-import { attachmentBase } from './junit.ts';
-import { outcome, type AttemptView, type OwnedArtifact } from './outcome.ts';
+import { failedStepOf } from './failure-text.ts';
+import { attachmentBase, errorBody as junitErrorBody, skippedMessage } from './junit.ts';
+import { listedInCi, outcome, type AttemptView, type OwnedArtifact } from './outcome.ts';
 
 /** The CTRF version every document claims. Pre-1.0 minors may break consumers, so moving it is its own change. */
 const SPEC_VERSION = '0.3.0';
@@ -113,17 +115,20 @@ export interface CtrfReportOptions {
    * attachments, since the file's path would mean nothing to a reader.
    */
   readonly artifactsDir?: string | undefined;
+  /**
+   * The run's redaction (`FinishedRun.redact`), applied to every text field a
+   * second time, since the file is made to be sent to other services. A
+   * local link it would change is left out rather than broken.
+   */
+  readonly redact?: ((text: string) => string) | undefined;
 }
 
-/** Text from the report, with terminal controls replaced as every reporter writes it. */
-function clean(text: string): string {
-  return sanitizeRecordedText(text);
-}
+/** Turns report text into what the file may carry: redacted, then with terminal controls replaced. */
+type Clean = (text: string) => string;
 
-/** `CODE (phase): message`; a failure on a step of a session beside the test's own names it, `CODE (phase) on launch-1: message`. */
-function errorBody(error: ReportError, actor?: string): string {
-  const phase = error.phase === undefined ? '' : ` (${error.phase})`;
-  return clean(`${error.code}${phase}${actor === undefined ? '' : ` on ${actor}`}: ${error.message}`);
+/** `CODE (phase): message`, as `junit` writes it, with the session a failed step ran on when it is not the test's own. */
+function errorBody(clean: Clean, error: ReportError, actor?: string): string {
+  return clean(junitErrorBody(error, actor));
 }
 
 /** A result's status as CTRF reads it; `rawStatus` keeps the word itself. */
@@ -191,12 +196,13 @@ function attachmentPath(artifact: OwnedArtifact['artifact'], options: CtrfReport
  * bytes are what the app served, unredacted unless they were text. An
  * artifact with nowhere a reader could open it is left out too.
  */
-function attachments(view: AttemptView, options: CtrfReportOptions): CtrfAttachment[] {
+function attachments(view: AttemptView, options: CtrfReportOptions, clean: Clean): CtrfAttachment[] {
   const out: CtrfAttachment[] = [];
   for (const { artifact, shared } of view.owned) {
     if (artifact.kind === 'download') continue;
     const where = attachmentPath(artifact, options);
-    if (where === undefined) continue;
+    // A path the redaction would change holds a secret; a link with a marker in it opens nothing.
+    if (where === undefined || (options.redact !== undefined && options.redact(where) !== where)) continue;
     out.push({
       name: clean(`${artifact.kind}-${artifact.id}`),
       contentType: clean(artifact.mediaType),
@@ -208,13 +214,13 @@ function attachments(view: AttemptView, options: CtrfReportOptions): CtrfAttachm
 }
 
 /** `api label`, or the api alone when the step has no label. */
-function stepName(step: ReportStep): string {
+function stepName(step: ReportStep, clean: Clean): string {
   return clean(step.label === '' ? step.api : `${step.api} ${step.label}`);
 }
 
-function renderStep(step: ReportStep): CtrfStep {
+function renderStep(step: ReportStep, clean: Clean): CtrfStep {
   return {
-    name: stepName(step),
+    name: stepName(step, clean),
     status: stepStatus(step.status),
     extra: {
       [EXTRA]: {
@@ -222,7 +228,7 @@ function renderStep(step: ReportStep): CtrfStep {
         kind: step.kind,
         durationMs: step.durationMs,
         ...(step.actor === undefined ? {} : { actor: clean(step.actor) }),
-        ...(step.error === undefined ? {} : { code: step.error.code }),
+        ...(step.error === undefined ? {} : { code: clean(step.error.code) }),
         ...(step.cache === undefined ? {} : { cache: step.cache.mode }),
         ...(step.explanation === undefined ? {} : { explanation: clean(step.explanation) }),
       },
@@ -230,13 +236,18 @@ function renderStep(step: ReportStep): CtrfStep {
   };
 }
 
-/** The step that failed the attempt, if one did: the actor its error names comes from there. */
+/** The session the step that ended the attempt ran on, matched as `junit` matches it. */
 function failedStepActor(view: AttemptView): string | undefined {
-  return view.steps.findLast((step) => step.error !== undefined)?.actor;
+  return failedStepOf(view)?.step.actor;
+}
+
+/** An attempt status whose error is its own: a member that passed or was skipped reads the group's, which is a sibling's. */
+function endedOnError(status: AttemptView['status']): boolean {
+  return status === 'failed' || status === 'timed-out' || status === 'interrupted';
 }
 
 /** The attempt's timing and identity fields, absent for a test that never ran. */
-function attemptFields(view: AttemptView): { attemptId?: string; start?: number; stop?: number; duration: number } {
+function attemptFields(view: AttemptView, clean: Clean): { attemptId?: string; start?: number; stop?: number; duration: number } {
   const start = epoch(view.startedAt);
   return {
     ...(view.id === undefined ? {} : { attemptId: clean(view.id) }),
@@ -245,40 +256,35 @@ function attemptFields(view: AttemptView): { attemptId?: string; start?: number;
   };
 }
 
-function renderRetryAttempt(view: AttemptView, number: number, options: CtrfReportOptions): CtrfRetryAttempt {
-  const files = attachments(view, options);
+function renderRetryAttempt(view: AttemptView, number: number, options: CtrfReportOptions, clean: Clean): CtrfRetryAttempt {
+  const files = attachments(view, options, clean);
+  const error = endedOnError(view.status) ? view.error : undefined;
   return {
     attempt: number,
     status: attemptStatus(view.status),
-    ...attemptFields(view),
-    ...(view.error === undefined ? {} : { message: clean(view.error.message), trace: errorBody(view.error, failedStepActor(view)) }),
+    ...attemptFields(view, clean),
+    ...(error === undefined ? {} : { message: clean(error.message), trace: errorBody(clean, error, failedStepActor(view)) }),
     ...(files.length === 0 ? {} : { attachments: files }),
     extra: { [EXTRA]: { status: view.status } },
   };
-}
-
-/** Why a result was skipped: its reason, after the test filter's name when one left it out. */
-function skippedMessage(result: ReportResult): string {
-  const reason = result.skip?.reason ?? 'skipped';
-  return clean(result.skip?.filter === undefined ? reason : `left out by filter ${result.skip.filter}: ${reason}`);
 }
 
 /**
  * The attempts that are the test's own, in order, and the one the test
  * object stands for: the outcome's verdict attempt, the last that reached
  * the result's verdict. A serial group attempt that never reached the
- * member is not its attempt.
+ * member is not its attempt. When the verdict attempt is one of those (a
+ * retry skipped the member), the test stands for no attempt, and the ones
+ * it ran are history.
  */
 function representedAttempts(views: readonly AttemptView[], verdict: AttemptView): { before: AttemptView[]; represented: AttemptView | undefined; after: number } {
   const own = views.filter((view) => view.ran);
-  const at = own.indexOf(verdict);
-  // A serial member's verdict view can be a group attempt that never reached it; then its last own one stands.
-  const index = at !== -1 ? at : own.findLastIndex((view) => !view.cut);
-  if (index === -1) return { before: [], represented: undefined, after: 0 };
+  const index = own.indexOf(verdict);
+  if (index === -1) return { before: own, represented: undefined, after: 0 };
   return { before: own.slice(0, index), represented: own[index], after: own.length - index - 1 };
 }
 
-function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>, options: CtrfReportOptions): CtrfTest {
+function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>, options: CtrfReportOptions, clean: Clean): CtrfTest {
   const view = outcome(result, groups);
   const { before, represented, after } = representedAttempts(view.attempts, view.verdict);
   const agent = result.agent === undefined || result.agent === 'default' ? '' : ` [${result.agent}]`;
@@ -292,29 +298,29 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
   const error = represented?.error;
   const message =
     result.status === 'skipped'
-      ? skippedMessage(result)
+      ? clean(skippedMessage(result))
       : result.status === 'interrupted'
         ? clean(`interrupted: ${view.final.error?.message ?? 'the run was stopped'}`)
         : status === 'failed' && error !== undefined
           ? clean(error.message)
           : undefined;
-  const files = represented === undefined ? [] : attachments(represented, options);
+  const files = represented === undefined ? [] : attachments(represented, options, clean);
   const steps = represented?.steps ?? [];
   const extra = {
     ...(status === 'failed' && error !== undefined && error.category !== 'test' ? { errorCategory: error.category } : {}),
-    ...(expected === undefined ? {} : { expectedFailure: { reason: clean(expected.reason), ...(expected.error === undefined ? {} : { code: expected.error.code, message: clean(expected.error.message) }) } }),
+    ...(expected === undefined ? {} : { expectedFailure: { reason: clean(expected.reason), ...(expected.error === undefined ? {} : { code: clean(expected.error.code), message: clean(expected.error.message) }) } }),
     ...(after === 0 ? {} : { cutAttempts: after }),
     ...(result.skip === undefined ? {} : { skipCause: result.skip.cause }),
   };
   return {
-    testId: result.id,
+    testId: clean(result.id),
     name: clean(`${result.file} > ${result.titlePath.join(' > ')}${repeatSuffix(result.repeat)} [${result.targetId}]${agent}`),
     status,
     rawStatus: result.status,
-    ...(represented === undefined ? { duration: 0 } : attemptFields(represented)),
+    ...(represented === undefined ? { duration: 0 } : attemptFields(represented, clean)),
     suite: [result.file, ...result.titlePath.slice(0, -1)].map(clean),
     ...(message === undefined ? {} : { message }),
-    ...(status === 'failed' && error !== undefined && represented !== undefined ? { trace: errorBody(error, failedStepActor(represented)) } : {}),
+    ...(status === 'failed' && error !== undefined && represented !== undefined ? { trace: errorBody(clean, error, failedStepActor(represented)) } : {}),
     line: result.source.line,
     tags: (result.tags ?? []).map(clean),
     labels: {
@@ -325,16 +331,16 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
     },
     type: result.kind === 'setup' ? 'setup' : 'e2e',
     filePath: clean(result.file),
-    ...(before.length === 0 ? {} : { retries: before.length, retryAttempts: before.map((attempt, index) => renderRetryAttempt(attempt, index + 1, options)) }),
+    ...(before.length === 0 ? {} : { retries: before.length, retryAttempts: before.map((attempt, index) => renderRetryAttempt(attempt, index + 1, options, clean)) }),
     ...(flaky ? { flaky: true } : {}),
     ...(files.length === 0 ? {} : { attachments: files }),
-    ...(steps.length === 0 ? {} : { steps: steps.map(renderStep) }),
+    ...(steps.length === 0 ? {} : { steps: steps.map((step) => renderStep(step, clean)) }),
     ...(Object.keys(extra).length === 0 ? {} : { extra: { [EXTRA]: extra } }),
   };
 }
 
 /** `osPlatform` and `osRelease` from report-1's `os`, which joins them with a space. */
-function osFields(os: string): Record<string, string> {
+function osFields(os: string, clean: Clean): Record<string, string> {
   const space = os.indexOf(' ');
   if (space === -1) return { osPlatform: clean(os) };
   return { osPlatform: clean(os.slice(0, space)), osRelease: clean(os.slice(space + 1)) };
@@ -351,12 +357,12 @@ function osFields(os: string): Record<string, string> {
  */
 export function renderCtrfReport(report: Report1Document, options: CtrfReportOptions = {}): string {
   const { run } = report;
+  const { redact } = options;
+  const clean: Clean = (text) => sanitizeRecordedText(redact === undefined ? text : redact(text));
   const groups = new Map(run.serialGroups.map((group) => [group.id, group]));
   const tests: CtrfTest[] = [];
   for (const result of run.results) {
-    // Other unselected results are report-only; a CI viewer counts what the run selected.
-    if (result.selected === false && result.skip?.filter === undefined) continue;
-    tests.push(renderResult(result, groups, options));
+    if (listedInCi(result)) tests.push(renderResult(result, groups, options, clean));
   }
   const count = (status: CtrfStatus): number => tests.filter((test) => test.status === status).length;
   const start = epoch(run.startedAt) ?? 0;
@@ -368,7 +374,7 @@ export function renderCtrfReport(report: Report1Document, options: CtrfReportOpt
     timestamp: run.finishedAt ?? run.startedAt,
     generatedBy: 'e2e',
     results: {
-      tool: { name: 'e2e', version: run.runner.version },
+      tool: { name: 'e2e', version: clean(run.runner.version) },
       summary: {
         tests: tests.length,
         passed: count('passed'),
@@ -384,15 +390,15 @@ export function renderCtrfReport(report: Report1Document, options: CtrfReportOpt
       },
       tests,
       environment: {
-        ...(run.vcs === undefined ? {} : { commit: run.vcs.commit, ...(run.vcs.branch === undefined ? {} : { branchName: clean(run.vcs.branch) }) }),
-        ...osFields(run.environment.os),
+        ...(run.vcs === undefined ? {} : { commit: clean(run.vcs.commit), ...(run.vcs.branch === undefined ? {} : { branchName: clean(run.vcs.branch) }) }),
+        ...osFields(run.environment.os, clean),
       },
       ...(run.errors.length === 0
         ? {}
         : {
             errors: run.errors.map((error) => ({
-              message: errorBody(error),
-              extra: { [EXTRA]: { code: error.code, category: error.category, ...(error.phase === undefined ? {} : { phase: error.phase }) } },
+              message: errorBody(clean, error),
+              extra: { [EXTRA]: { code: clean(error.code), category: error.category, ...(error.phase === undefined ? {} : { phase: error.phase }) } },
             })),
           }),
     },
@@ -433,7 +439,7 @@ export function ctrf(options: CtrfReporterOptions = {}): Reporter {
         : [
             {
               path: options.outputFile ?? path.join(run.outputDir, 'ctrf.json'),
-              content: renderCtrfReport(run.report, { artifactsDir: attachmentBase(run) }),
+              content: renderCtrfReport(run.report, { artifactsDir: attachmentBase(run), redact: run.redact }),
               label: 'CTRF',
             },
           ],

@@ -135,9 +135,29 @@ describe('ctrf reporter at the process boundary', () => {
     for (const file of ['report.json', 'junit.xml', 'ctrf.json']) expect(existsSync(path.join(project.dir, '.e2e', file)), file).toBe(false);
   });
 
-  it('keeps ctrf off by default (a guard, also true on main): list alone writes no ctrf.json', () => {
-    const { project, exitCode } = run({ 'e2e.config.ts': fakeConfig(), 'tests/ok.e2e.ts': `import { test } from 'e2e';\ntest('ok', () => {});\n` }, ['--reporter', 'list']);
+  it('maps a test the run stopped to other, which JUnit counts as skipped', () => {
+    const { exitCode, output, read } = run(
+      {
+        'e2e.config.ts': fakeConfig(),
+        'tests/slow.e2e.ts': `import { test } from 'e2e';\ntest('skipped on purpose', { skip: true }, () => {});\ntest('outlives the run', { timeout: 60_000 }, async () => {\n  await new Promise((resolve) => setTimeout(resolve, 30_000));\n});\n`,
+      },
+      ['--reporter', 'list,junit,ctrf', '--max-duration', '1500'],
+    );
+    expect(exitCode, output).toBe(1);
+    const document = JSON.parse(read('ctrf.json')) as Json;
+    assertValidCtrf(document);
+    const stopped = (document.results.tests as Json[]).find((test) => test.name.includes('outlives the run'));
+    expect(stopped).toMatchObject({ status: 'other', rawStatus: 'interrupted', message: expect.stringMatching(/^interrupted: /u) });
+    const totals = counts(read('junit.xml'), 'testsuites');
+    // The time limit is a run error: JUnit adds a `run` suite case for it, CTRF lists it in results.errors.
+    expect(document.results.errors).toEqual([expect.objectContaining({ extra: { 'e2e-inc.e2e': expect.objectContaining({ code: 'RUN_TIMEOUT' }) } })]);
+    expect(document.results.summary).toMatchObject({ other: 1, skipped: totals.skipped! - 1, tests: totals.tests! - document.results.errors.length });
+  });
+
+  it('keeps ctrf off by default (a guard, also true on main): a config without reporters writes no ctrf.json', () => {
+    const { project, exitCode } = run({ 'e2e.config.ts': fakeConfig(), 'tests/ok.e2e.ts': `import { test } from 'e2e';\ntest('ok', () => {});\n` }, []);
     expect(exitCode).toBe(0);
+    expect(existsSync(path.join(project.dir, '.e2e', 'report.json'))).toBe(true);
     expect(existsSync(path.join(project.dir, '.e2e', 'ctrf.json'))).toBe(false);
   });
 });

@@ -204,12 +204,15 @@ reporters: ['list', 'ctrf'],
 
 - It takes the same `outputFile` as `junit`:
   `ctrf({ outputFile: 'reports/ctrf.json' })`. It writes nothing when the
-  report was not written.
-- One CTRF test per row of `junit.xml`. Its `name` starts with the test
-  file, and `testId` is the result id, the same in every run.
+  report was not written, so a run that stopped before its tests leaves
+  the previous `ctrf.json` in place, as it leaves `junit.xml`.
+- One CTRF test per `<testcase>` of `junit.xml`, leaving out its `run`
+  suite. Its `name` starts with the test file, and `testId` is the result
+  id, the same in every run.
 - A test stands for one attempt: the last one that reached its verdict.
   The attempts before it are `retryAttempts`. A test that passed on a retry
-  has `flaky: true`.
+  has `flaky: true`. A test in a serial group that a retry skipped stands
+  for no attempt, and the attempts it ran are its `retryAttempts`.
 - `status` is CTRF's `passed`, `failed`, `skipped`, or `other`. `rawStatus`
   keeps e2e's own: `timed-out` is `failed`, `interrupted` is `other`.
 - Run errors, such as a failed `afterAll`, go in `results.errors` and never
@@ -220,6 +223,8 @@ reporters: ['list', 'ctrf'],
   download, is left out. A test in a [serial group](/reference/test#serial)
   lists only its own files, plus files of the group, such as its video,
   that belong to no single test.
+- Every text field passes the run's secret redaction again. A local path
+  the redaction would change is left out.
 - Data CTRF has no field for, such as each step's e2e status and the run's
   model tokens and cost, is under the `e2e-inc.e2e` key of each `extra`.
 

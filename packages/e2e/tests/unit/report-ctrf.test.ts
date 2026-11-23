@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FinishedRun } from '../../src/run-types.ts';
 import type { Report1Document, ReportResult, ReportSerialGroup } from '../../src/report/build.ts';
 import { ctrf, renderCtrfReport, type CtrfReportOptions } from '../../src/report/ctrf.ts';
+import { listedInCi, outcome } from '../../src/report/outcome.ts';
 import { assertValidCtrf } from '../helpers/ctrf-schema.ts';
 import { REPORT_AT as AT, reportAttempt, reportDocument, reportError, reportResult, reportStep } from '../helpers/report.ts';
 
@@ -152,6 +153,13 @@ describe('renderCtrfReport', () => {
     expect(test).not.toHaveProperty('retryAttempts');
   });
 
+  it('names the session of the step that ended the attempt, as junit does, not of a later failed teardown step', () => {
+    const body = reportStep({ id: 'body', status: 'failed', actor: 'launch-1', error: reportError({ code: 'ASSERTION_FAILED', phase: 'body' }) });
+    const teardown = reportStep({ id: 'teardown', status: 'failed', actor: 'launch-2', phase: 'afterEach', error: reportError({ code: 'ENGINE_CRASHED', phase: 'afterEach' }) });
+    const [test] = tests(doc({ results: [reportResult({ status: 'failed', attempts: [reportAttempt({ status: 'failed', steps: [body, teardown], error: reportError({ phase: 'body' }) })] })] }));
+    expect(test!.trace).toBe('ASSERTION_FAILED (body) on launch-1: expected "Sign in" to be visible');
+  });
+
   it('keeps a harness failure failed, so a CI check reading failed counts goes red, and names its category', () => {
     const error = reportError({ category: 'infrastructure', code: 'ENGINE_CRASHED', message: 'browser went away' });
     const [test] = tests(doc({ results: [reportResult({ status: 'failed', attempts: [reportAttempt({ status: 'failed', error })] })] }));
@@ -262,6 +270,29 @@ describe('renderCtrfReport', () => {
       ]);
     });
 
+    it('prefers a hosted URL to a store reference', () => {
+      const both = artifact('video-3', { kind: 'video', mediaType: 'video/webm', path: undefined, url: 'https://videos.example/v/3', ref: 'https://store.example/v/3' });
+      expect(attached([both])?.map((file) => file.path)).toEqual(['https://videos.example/v/3']);
+    });
+
+    it('keeps the attachments of an earlier attempt on its retryAttempts entry', () => {
+      const shot = artifact('shot-9', { url: 'https://store.example/shot-9' });
+      const [test] = tests(doc({ results: [reportResult({ status: 'flaky', attempts: [reportAttempt({ status: 'failed', error: reportError(), artifacts: [shot] }), reportAttempt({ id: 'attempt-2', index: 1 })] })] }));
+      expect(test!.retryAttempts[0].attachments).toEqual([expect.objectContaining({ name: 'screenshot-shot-9', path: 'https://store.example/shot-9' })]);
+      expect(test).not.toHaveProperty('attachments');
+    });
+
+    it('leaves out a local link the run redaction would change, and redacts every other text field', () => {
+      const redact = (text: string): string => text.replaceAll('Zr8Kq2', '<secret:probe>');
+      const document = render(
+        doc({ results: [reportResult({ titlePath: ['auth', 'as Zr8Kq2'], tags: ['Zr8Kq2'], status: 'failed', attempts: [reportAttempt({ status: 'failed', error: reportError({ message: 'saw Zr8Kq2' }), artifacts: [artifact('shot-1')] })] })] }),
+        { artifactsDir: 'out-Zr8Kq2/results', redact },
+      );
+      expect(JSON.stringify(document)).not.toContain('Zr8Kq2');
+      expect(document.results.tests[0]).toMatchObject({ name: 'tests/auth.e2e.ts > auth > as <secret:probe> [web]', tags: ['<secret:probe>'], message: 'saw <secret:probe>' });
+      expect(document.results.tests[0]).not.toHaveProperty('attachments');
+    });
+
     it('leaves out a download, a withheld artifact, and a local file when no artifacts directory is known', () => {
       const download = artifact('dl-1', { kind: 'download', mediaType: 'text/plain', redaction: 'incomplete' });
       const withheld = artifact('video-2', { kind: 'video', mediaType: 'video/webm', path: undefined, redaction: 'incomplete' });
@@ -342,15 +373,46 @@ describe('renderCtrfReport', () => {
     });
 
     it('takes a member flaky from its own records, not from the group status it inherits', () => {
-      const first = groupAttempt('group-attempt-1', [member('test-1'), member('test-2', { status: 'failed', error: reportError() })], { status: 'failed' });
+      const first = groupAttempt('group-attempt-1', [member('test-1'), member('test-2', { status: 'failed', error: reportError({ message: 'card declined' }) })], { status: 'failed', error: reportError({ message: 'card declined' }) });
       const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2' }), member('test-2', { id: 'test-2-member-2' })], { index: 1 });
       const serial = group([first, second], 'flaky');
       const document = render(doc({ serialGroups: [serial], results: memberResults(serial, ['flaky', 'flaky']) }));
       const [adds, pays] = document.results.tests as Json[];
       expect(adds).toMatchObject({ status: 'passed', rawStatus: 'flaky', attemptId: 'test-1-member-2', retries: 1 });
       expect(adds).not.toHaveProperty('flaky');
+      // The group attempt's error is the sibling's: a member that passed carries none of it.
+      expect(adds.retryAttempts[0]).toEqual(expect.objectContaining({ status: 'passed' }));
+      expect(adds.retryAttempts[0]).not.toHaveProperty('message');
+      expect(adds.retryAttempts[0]).not.toHaveProperty('trace');
       expect(pays).toMatchObject({ status: 'passed', rawStatus: 'flaky', flaky: true, attemptId: 'test-2-member-2', retries: 1 });
+      expect(pays.retryAttempts[0]).toMatchObject({ status: 'failed', message: 'card declined' });
       expect(document.results.summary).toMatchObject({ passed: 2, flaky: 1 });
+    });
+
+    it('counts a member flaky when an earlier attempt of its own timed out', () => {
+      const first = groupAttempt('group-attempt-1', [member('test-1', { status: 'timed-out', error: reportError({ code: 'TEST_TIMEOUT' }) }), member('test-2', { status: 'skipped', durationMs: 0, skip: { cause: 'serial-predecessor-failed', reason: 'earlier failed' } })], { status: 'timed-out' });
+      const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2' }), member('test-2', { id: 'test-2-member-2' })], { index: 1 });
+      const serial = group([first, second], 'flaky');
+      const [adds] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['flaky', 'flaky']) }));
+      expect(adds).toMatchObject({ flaky: true, retries: 1 });
+    });
+
+    it('keeps a member a later retry skipped as skipped, standing for no attempt, with the attempt it ran and failed as history', () => {
+      const skip = { cause: 'serial-predecessor-failed' as const, reason: 'an earlier test in the serial group failed' };
+      const failShot = artifact('pays-failure');
+      const first = groupAttempt(
+        'group-attempt-1',
+        [member('test-1'), member('test-2', { status: 'failed', error: reportError({ message: 'card declined' }), failure: { screenshot: 'pays-failure' } })],
+        { status: 'failed', error: reportError({ message: 'card declined' }), artifacts: [failShot] },
+      );
+      const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2', status: 'failed', error: reportError({ message: 'cart empty' }) }), member('test-2', { id: 'test-2-member-2', status: 'skipped', durationMs: 0, skip })], { index: 1, status: 'failed', error: reportError({ message: 'cart empty' }) });
+      const serial = group([first, second], 'failed');
+      const [, pays] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['failed', 'skipped'], skip) }), { artifactsDir: '.e2e/results' });
+      expect(pays).toMatchObject({ status: 'skipped', duration: 0, message: 'an earlier test in the serial group failed', retries: 1 });
+      for (const field of ['attemptId', 'start', 'attachments', 'trace']) expect(pays).not.toHaveProperty(field);
+      expect(pays!.retryAttempts).toEqual([
+        expect.objectContaining({ attempt: 1, attemptId: 'test-2-member', status: 'failed', message: 'card declined', attachments: [expect.objectContaining({ name: 'screenshot-pays-failure' })] }),
+      ]);
     });
 
     it('gives a member the group never reached no attempt, no attachments, and no retries', () => {
@@ -380,6 +442,32 @@ describe('renderCtrfReport', () => {
     const [test] = tests(doc({ results: [reportResult({ titlePath: ['auth', 'signs \u001b[31min'], status: 'failed', attempts: [reportAttempt({ status: 'failed', error: reportError({ message: 'red \u0007bell' }) })] })] }));
     expect(test!.name).toBe('tests/auth.e2e.ts > auth > signs in [web]');
     expect(test!.message).not.toContain('\u0007');
+  });
+});
+
+describe('outcome', () => {
+  it('works out no artifacts for a serial member the group attempt never reached, not even the group video', () => {
+    const video = artifact('group-video', { kind: 'video', mediaType: 'video/webm' });
+    const members = [
+      { id: 'm1', index: 0, testId: 'test-1', status: 'failed' as const, startedAt: AT, durationMs: 1, steps: [], secondaryErrors: [] },
+      { id: 'm2', index: 1, testId: 'test-2', status: 'skipped' as const, startedAt: AT, durationMs: 0, steps: [], secondaryErrors: [], skip: { cause: 'serial-predecessor-failed' as const, reason: 'earlier failed' } },
+    ];
+    const serial: ReportSerialGroup = {
+      id: 'group-1', serialId: 's', declarationIndex: 0, file: 'tests/checkout.e2e.ts', source: { file: 'tests/checkout.e2e.ts', line: 1, column: 1 }, titlePath: ['s'],
+      targetId: 'web', platform: 'web', agent: 'default', repeat: 0, memberTestIds: ['test-1', 'test-2'], status: 'failed',
+      attempts: [{ id: 'g1', index: 0, status: 'failed', startedAt: AT, durationMs: 1, members, artifacts: [video], secondaryErrors: [], cleanup: 'complete' }],
+    };
+    const groups = new Map([[serial.id, serial]]);
+    const ran = outcome(reportResult({ testId: 'test-1', serialGroupId: 'group-1', status: 'failed', attempts: [] }), groups).attempts[0]!;
+    const unreached = outcome(reportResult({ testId: 'test-2', serialGroupId: 'group-1', status: 'skipped', attempts: [] }), groups).attempts[0]!;
+    expect(ran.owned).toEqual([{ artifact: video, shared: true }]);
+    expect(unreached).toMatchObject({ ran: false, owned: [] });
+  });
+
+  it('lists a result in a CI file when the run selected it or a test filter left it out', () => {
+    expect(listedInCi(reportResult())).toBe(true);
+    expect(listedInCi(reportResult({ selected: false, skip: { cause: 'filtered', reason: 'r', filter: 'jev' } }))).toBe(true);
+    expect(listedInCi(reportResult({ selected: false, skip: { cause: 'filtered', reason: 'r' } }))).toBe(false);
   });
 });
 
