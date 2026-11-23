@@ -1,7 +1,9 @@
 /**
- * A windowed list whose scrolling animates after the wheel event, as a
- * smooth-scroll library does, and a page whose content sits in, partly in,
- * and out of the viewport.
+ * Pages for scrolling:
+ *
+ * - A windowed list whose scrolling animates after the wheel event, as a
+ *   smooth-scroll library does.
+ * - A page with content inside, partly inside, and outside the viewport.
  */
 
 import { constant, type PageRenderer } from './page.ts';

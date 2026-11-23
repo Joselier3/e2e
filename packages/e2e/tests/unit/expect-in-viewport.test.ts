@@ -7,7 +7,7 @@ import { useFakeTime } from '../helpers/fake-time.ts';
 
 useFakeTime();
 
-/** A box at `x`, `y`, 100 by 100 pixels, in the fixture's 1280 by 720 viewport. */
+/** Returns a 100 by 100 pixel box at `x`, `y`, in the fixture's 1280 by 720 viewport. */
 function box(testId: string, x: number, y: number, states?: NonNullable<SemanticNode['states']>): SemanticNode {
   return {
     ref: { id: testId, revision: '' },
@@ -30,7 +30,7 @@ const screen = createScreenFixture([
 const at = (testId: string): AsyncExpectation => expectFixture(screen.getByTestId(testId));
 const soon = { timeout: 100 };
 
-/** Options typed as the caller's own object, the way a JavaScript test reaches the matcher. */
+/** Passes options through without type checks, the way a JavaScript test calls the matcher. */
 const computed = (options: Record<string, unknown>): { ratio?: number } => ({ ...options });
 
 describe('toBeInViewport', () => {
@@ -61,7 +61,7 @@ describe('toBeInViewport', () => {
     await at('on-edge').not.toBeInViewport(soon);
   });
 
-  it('passes negated for a hidden or absent node, and fails positive naming why', async () => {
+  it('passes negated for a hidden or absent node, and fails with the reason when not negated', async () => {
     await at('hidden').not.toBeInViewport(soon);
     await at('missing').not.toBeInViewport(soon);
     await expect(at('hidden').toBeInViewport(soon)).rejects.toMatchObject({
@@ -79,14 +79,14 @@ describe('toBeInViewport', () => {
     });
   });
 
-  it('reads a shown node the engine reports no box for as outside the viewport', async () => {
+  it("counts a shown node that doesn't have a box as outside the viewport", async () => {
     await at('boxless').not.toBeInViewport(soon);
     await expect(at('boxless').toBeInViewport(soon)).rejects.toMatchObject({
       message: expect.stringContaining('observed: no box (match count 1)'),
     });
   });
 
-  it('passes ratio 1 for a box fully inside whose area rounds below 1', async () => {
+  it('passes ratio 1 for a box fully inside whose share comes out just under 1', async () => {
     const fractional: SemanticNode = {
       ref: { id: 'fractional', revision: '' },
       role: 'generic',
@@ -105,7 +105,7 @@ describe('toBeInViewport', () => {
     );
   });
 
-  it('refuses an option it does not take', () => {
+  it("refuses an option it doesn't take", () => {
     expect(() => at('inside').toBeInViewport(computed({ visible: true }))).toThrow(
       expect.objectContaining({ code: 'INVALID_ARGUMENT' }),
     );

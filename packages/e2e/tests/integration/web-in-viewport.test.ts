@@ -1,8 +1,10 @@
 /**
- * `toBeInViewport` on the web engine: a pager page off to the side and a
- * paragraph below the fold are visible but not in the viewport, a box half
- * past the bottom edge passes up to its ratio, and the negated form passes on
- * a hidden or absent node.
+ * Covers `toBeInViewport` on the web engine:
+ *
+ * - A pager page off to the side and a paragraph below the fold are visible
+ *   but not in the viewport.
+ * - A box half past the bottom edge counts as in view up to `ratio: 0.5`.
+ * - The negated form passes on a hidden or absent node.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -33,14 +35,14 @@ test('content scrolled out of view is not in the viewport', async ({ app, screen
   await expect(screen.getByRole('heading', { name: 'Viewport' })).not.toBeInViewport(soon);
 });
 
-test('a box half in view passes up to its ratio', async ({ app, screen }) => {
+test('a box half in view counts as in the viewport up to ratio 0.5', async ({ app, screen }) => {
   await app.open('/viewport');
   await expect(screen.getByText('Peeking box')).toBeInViewport();
   await expect(screen.getByText('Peeking box')).toBeInViewport({ ratio: 0.5 });
   await expect(screen.getByText('Peeking box')).not.toBeInViewport({ ratio: 0.6, ...soon });
 });
 
-test('a box half in view fails a larger ratio', async ({ app, screen }) => {
+test("a box half in view doesn't count as in the viewport at ratio 0.6", async ({ app, screen }) => {
   await app.open('/viewport');
   await expect(screen.getByText('Peeking box')).toBeInViewport({ ratio: 0.6, ...soon });
 });
@@ -70,15 +72,15 @@ describe('toBeInViewport on the web engine', () => {
   it.each([
     'an off-screen pager page is visible but not in the viewport',
     'content scrolled out of view is not in the viewport',
-    'a box half in view passes up to its ratio',
+    'a box half in view counts as in the viewport up to ratio 0.5',
     'the negated form passes on a hidden or absent node',
   ])('%s', (title) => {
     const result = resultByTitle(outcome, title);
     expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
   });
 
-  it('names the ratio it saw when a box is less in view than asked', () => {
-    const result = resultByTitle(outcome, 'a box half in view fails a larger ratio');
+  it('fails with the observed ratio when less of the box is in view than asked', () => {
+    const result = resultByTitle(outcome, "a box half in view doesn't count as in the viewport at ratio 0.6");
     expect(result.status).toBe('failed');
     expect(result.attempts[0]?.error).toMatchObject({
       code: 'ASSERTION_FAILED',

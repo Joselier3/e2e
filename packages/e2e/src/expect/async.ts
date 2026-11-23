@@ -36,7 +36,7 @@ interface Sample {
   readonly node: SemanticNode | null;
   /** Every current match, read; only a `wholeSet: 'read'` matcher asks for them. */
   readonly nodes: readonly SemanticNode[];
-  /** The viewport size. It's read only for a `readsViewport` matcher, when the node is shown and has a box. */
+  /** The viewport size. It's read only for a `readsViewport` matcher when the node is shown and has a box. */
   readonly viewport?: ViewportSize;
 }
 
@@ -66,7 +66,7 @@ interface MatcherSpec {
    * or the failure message reads it: withheld is redacted, not empty or absent.
    */
   readonly readsWithheld?: boolean;
-  /** Set it when the predicate compares the node's box with the viewport size of a fresh screen observation. */
+  /** Set it to give the predicate the viewport size of a fresh screen observation. */
   readonly readsViewport?: boolean;
   readonly predicate: (sample: Sample) => boolean;
   readonly describeExpected: string;
@@ -391,8 +391,9 @@ class AsyncExpectationImpl implements AsyncExpectation {
         name: 'toBeInViewport',
         evaluableWithoutNode: true,
         readsViewport: true,
-        // Playwright allows the same tolerance. A box fully inside the
-        // viewport can compute to just under 1, and it has to pass `ratio: 1`.
+        // The share of a box fully inside the viewport can come out just
+        // under 1 from floating-point math, but it still has to pass
+        // `ratio: 1`. The same tolerance is used in Playwright.
         predicate: (sample) => {
           const inside = share(sample);
           return inside > 0 && inside > ratio - 1e-9;

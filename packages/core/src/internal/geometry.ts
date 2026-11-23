@@ -117,7 +117,7 @@ export function viewportShare(box: Box, viewport: ViewportSize): number {
   return clamp((width * height) / (viewport.width * viewport.height), 0, 1);
 }
 
-/** Returns the share of a box inside the viewport, from 0 to 1. It's 0 for a box without area. */
+/** Returns the share of a box inside the viewport, from 0 to 1. It's 0 for a box that doesn't have any area. */
 export function boxShareInViewport(box: Box, viewport: ViewportSize): number {
   const width = Math.min(box.x + box.width, viewport.width) - Math.max(box.x, 0);
   const height = Math.min(box.y + box.height, viewport.height) - Math.max(box.y, 0);
