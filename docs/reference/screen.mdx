@@ -980,7 +980,7 @@ await screen.getByRole('contentinfo').scrollIntoView();
 /**
  * Performs a swipe scoped to exactly one node: in a direction, or along a
  * path between two points of its box once it is in view, which drags a
- * pager that a wheel event leaves alone.
+ * pager that follows pointer drags and ignores a wheel event.
  */
 swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
 ```
@@ -999,15 +999,18 @@ It takes the two shapes of [`screen.swipe`](#screen-swipe), plus `timeout`,
 which `screen.swipe` refuses.
 
 - `{ direction, momentum? }` scrolls the node. On the web it is a wheel
-  event, which a pager built on touch or pointer events ignores.
+  event, which a pager that follows pointer drags ignores.
 - `{ from, to, duration? }` drags along a path on the node's box: a touch
-  swipe on a device, a pointer drag on the web. As with
-  `tap({ position })`, the engine scrolls the node into view when it lists
-  `scrollIntoView`, then reads the node's box and dispatches the gesture.
+  swipe on a device, a mouse drag on the web. The web drag fires pointer
+  and mouse events, no touch events. As with `tap({ position })`, the
+  engine scrolls the node into view when it lists `scrollIntoView`, then
+  reads the node's box and dispatches the gesture. No node is behind the
+  gesture, so the enabled and not-covered checks do not run.
 - A pixel coordinate is an offset from the node's top-left corner, inside
-  its border on the web, as in [`tap({ position })`](#tap). A percentage
-  is that share of the box's width (`x`) or height (`y`), from `'0%'`
-  through `'100%'`.
+  its border on the web, as in [`tap({ position })`](#tap). It is not
+  limited to the box. A percentage is that share of the width (`x`) or
+  height (`y`) of the part of the box that shows, from `'0%'` through
+  `'100%'`, so it stays inside the box.
 
 | Throws | When |
 | --- | --- |
@@ -1436,8 +1439,8 @@ export interface SwipeOptions {
  * A swipe along a path between two points: a touch swipe on a device, a
  * pointer drag on a document platform. On `screen` the points are on the
  * viewport. On a locator they are on the node's box: pixels from its
- * top-left corner, as `tap({ position })` takes them, and percentages of its
- * width (`x`) or height (`y`).
+ * top-left corner, as `tap({ position })` takes them, and percentages of the
+ * width (`x`) or height (`y`) of the part of it that shows.
  */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
@@ -1458,7 +1461,7 @@ export interface SwipePathOptions {
  */
 export type Point = ViewportPoint; // { x: number; y: number }
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`; of the node's box for `locator.swipe`. */
 export type ScreenCoordinate = number | `${number}%`;
 
 /** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */

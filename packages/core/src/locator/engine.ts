@@ -588,13 +588,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     });
     // pollReads returns only once `evaluate` answered true, which set `box`.
     const { rect, origin } = box!;
-    const at = resolveBoxPoint(point, rect, origin);
-
-    if (!('target' in action)) {
-      await this.dispatchAt(at, action, deadline);
-      return;
-    }
-    await this.dispatchAt(at, { ...action, target: resolveBoxPoint(action.target, rect, origin) }, deadline);
+    const inPixels = 'target' in action ? { ...action, target: resolveBoxPoint(action.target, rect, origin) } : action;
+    await this.dispatchAt(resolveBoxPoint(point, rect, origin), inPixels, deadline);
   }
 
   /** One pointer dispatch within a deadline, its engine error translated to the public taxonomy. */

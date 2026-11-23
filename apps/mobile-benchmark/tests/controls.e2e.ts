@@ -371,6 +371,12 @@ test.describe('control inventory', () => {
     if (path === null) throw new Error('swipe status has no path');
     expect(Math.abs(Number(path[1]) - 100)).toBeLessThanOrEqual(15);
 
+    await swipePad.swipe({ from: { x: 280, y: '50%' }, to: { x: 80, y: '50%' } });
+    await expect(swipeStatus).toContainText('swipe: 280,40 to ');
+    const boxPath = /^swipe: 280,40 to (\d+),40$/.exec((await swipeStatus.textContent()) ?? '');
+    if (boxPath === null) throw new Error('swipe status has no path');
+    expect(Math.abs(Number(boxPath[1]) - 80)).toBeLessThanOrEqual(15);
+
     // `direction` is the scroll direction: content to the right comes into
     // view when the finger moves left, so the end lands left of the start.
     await swipePad.swipe({ direction: 'right' });

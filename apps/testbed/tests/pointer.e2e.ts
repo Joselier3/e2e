@@ -64,6 +64,9 @@ test('locator.swipe({ from, to }) turns a pager that only follows pointer drags'
   await app.open('/pointer');
   const pager = screen.getByRole('region', 'Photo pager');
 
+  await pager.swipe({ direction: 'right', momentum: 'fast' });
+  await expect(screen.getByLabel('Pager state')).toHaveText('page 1 of 3');
+
   await pager.swipe({ from: { x: '90%', y: '50%' }, to: { x: '10%', y: '50%' } });
   await expect(screen.getByLabel('Pager state')).toHaveText('page 2 of 3');
 

@@ -1086,11 +1086,15 @@ describe('coordinate input', () => {
     expect(pointTimeouts[1]).toBeLessThanOrEqual(1_000);
   });
 
-  it('locator.swipe measures pixels from the node origin and percentages from its box', async () => {
-    const { engine, performedAt } = pointer({ origin: { x: 102, y: 203 } });
-    const { fixtures } = runtime(engine);
-    await fixtures.screen.getByLabel('Pad').swipe({ from: { x: 0, y: '0%' }, to: { x: '50%', y: 4 } });
-    expect(performedAt).toEqual(['swipeTo @ 102,200 -> 125,207']);
+  it('locator.swipe measures pixels from the node origin and percentages from the box that shows', async () => {
+    const bordered = pointer({ origin: { x: 102, y: 203 } });
+    await runtime(bordered.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: 0, y: '0%' }, to: { x: '50%', y: 4 } });
+    expect(bordered.performedAt).toEqual(['swipeTo @ 102,200 -> 125,207']);
+
+    // A frame clipped the box: its origin is the node's real corner, outside the box that shows.
+    const clipped = pointer({ origin: { x: 60, y: 200 } });
+    await runtime(clipped.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: 0, y: 0 }, to: { x: '0%', y: '100%' } });
+    expect(clipped.performedAt).toEqual(['swipeTo @ 60,200 -> 100,219']);
   });
 
   it('locator.swipe refuses invalid points, durations, and options before resolving the node', async () => {

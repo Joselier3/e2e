@@ -320,7 +320,7 @@ Each action resolves one node, waits up to `config.actionTimeout` (30 s, or
 array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover()`, `setInputFiles(files)`
 (paths relative to the project root, or `{ name, mimeType, buffer: Buffer }` payloads, singly or as an array; `[]` clears; a missing path, or one under a directory the runner cannot search, is `INVALID_ARGUMENT`), `dragTo(locator)`, `scrollIntoView()`,
 `swipe({ direction, momentum? })` or `swipe({ from, to, duration? })` (a
-drag on the node's box, which turns a pager a wheel leaves alone). Web only, `UNSUPPORTED_CAPABILITY` on a
+pointer drag on the node's box, which turns a pager that ignores a wheel). Web only, `UNSUPPORTED_CAPABILITY` on a
 device: `blur`, `secondaryTap`, `selectOption`, `setInputFiles`, `scrollIntoView`,
 and `modifiers`.
 

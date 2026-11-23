@@ -467,7 +467,7 @@ export interface ActionOptions {
  */
 export type Point = ViewportPoint;
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`; of the node's box for `locator.swipe`. */
 export type ScreenCoordinate = number | `${number}%`;
 
 /** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
@@ -526,8 +526,8 @@ export interface SwipeOptions {
  * A swipe along a path between two points: a touch swipe on a device, a
  * pointer drag on a document platform. On `screen` the points are on the
  * viewport. On a locator they are on the node's box: pixels from its
- * top-left corner, as `tap({ position })` takes them, and percentages of its
- * width (`x`) or height (`y`).
+ * top-left corner, as `tap({ position })` takes them, and percentages of the
+ * width (`x`) or height (`y`) of the part of it that shows.
  */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
@@ -636,7 +636,7 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   /**
    * Performs a swipe scoped to exactly one node: in a direction, or along a
    * path between two points of its box once it is in view, which drags a
-   * pager that a wheel event leaves alone.
+   * pager that follows pointer drags and ignores a wheel event.
    */
   swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
   /** Reads normalized text once a match exists, without retrying for a particular value. */
