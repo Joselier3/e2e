@@ -71,6 +71,16 @@ describe('relocation of a target recorded with twins beside its test id', () => 
     expect(relocateDescriptor(preview, screen(textButton('a', 'Preview', 'new-1'), textButton('b', 'Publish', 'new-2')))).toEqual({ kind: 'found', id: 'a' });
   });
 
+  it('finds the one left of two controls sharing a test id when it shows the recorded text, and stops on the other', () => {
+    const textButton = (id: string, text: string): SemanticNode => ({ ref: { id, revision: 'r' }, role: 'button', text, testId: 'dup' });
+    // Recorded as the first of two buttons sharing test id `dup`, told apart only by their text.
+    const preview = { role: 'button', text: 'Preview', testId: 'dup', position: { index: 0, of: 2 } };
+    expect(relocateDescriptor(preview, screen(textButton('a', 'Preview')))).toEqual({ kind: 'found', id: 'a' });
+    expect(relocateDescriptor(preview, screen(textButton('b', 'Publish')))).toEqual({ kind: 'failed', failure: 'target-ambiguous', candidates: ['b'], twinLeft: true });
+    // Two with the recorded text too: the text tells nothing apart.
+    expect(relocateDescriptor({ ...preview, twinsWithoutTestId: true }, screen(textButton('a', 'Preview')))).toMatchObject({ kind: 'failed', twinLeft: true });
+  });
+
   it('still forgives a changed test id on a control recorded without twins', () => {
     expect(relocateDescriptor({ role: 'button', name: 'Set up', testId: 'setup-primary' }, screen(button('b', 'setup-renamed')))).toEqual({
       kind: 'found',

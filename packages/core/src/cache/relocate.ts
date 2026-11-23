@@ -45,7 +45,7 @@ export type RelocationResult =
   /**
    * Several nodes share the matched identity; a caller with other evidence (a recorded point) may still tell them apart.
    * `twinLeft` marks one named match refused because the recording saw twins of it: it is as likely one of them, so no
-   * other evidence settles it.
+   * other evidence settles it. A replay that looks again keeps the mark on later looks of that relocation.
    */
   | { readonly kind: 'failed'; readonly failure: 'target-ambiguous'; readonly candidates: readonly string[]; readonly twinLeft?: true };
 
@@ -241,7 +241,17 @@ export function relocateDescriptor(
   // tier when the fields beside the test id matched other controls; a count
   // taken on the strict tier says nothing about the semantic one. A count
   // taken on a look an earlier action of the step changed proves nothing.
-  const countedNamed = tier.kind === 'strict' && position !== undefined && position.of > 1 && !descriptorTiers(descriptor).some(matchesByPlace);
+  // The strict tier of a nameless target with a test id ignores its text, so
+  // its count may cover controls the text tells apart: a lone match showing
+  // the recorded text is the node, unless the recording saw that text twice.
+  const toldByText =
+    matches.length === 1 &&
+    descriptor.name === undefined &&
+    descriptor.text !== undefined &&
+    descriptor.twinsWithoutTestId !== true &&
+    describeNodes(nodes).find((candidate) => candidate.id === matches[0])?.descriptor.text === descriptor.text;
+  const countedNamed =
+    tier.kind === 'strict' && position !== undefined && position.of > 1 && !toldByText && !descriptorTiers(descriptor).some(matchesByPlace);
   const twinned = descriptor.countedOnEarlierLook !== true && (countedNamed || (tier.kind === 'semantic' && descriptor.twinsWithoutTestId === true));
   const alone = matchesByPlace(tier) ? position?.of === 1 : !twinned;
   if (matches.length === 1 && alone) return { kind: 'found', id: matches[0]! };

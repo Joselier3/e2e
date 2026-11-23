@@ -953,26 +953,23 @@ export class ActionDispatcher {
   }
 
   /**
-   * Where a node sat when it was acted on, for the trace: the container it
-   * sits in (that is what tells this row's "Delete" from the next row's when
-   * the flow replays) and, when the description still matches several
-   * controls, its position among them, so a replay that finds the same
-   * number picks the same one. A node its test id alone tells apart notes
-   * whether its other fields have twins, so a replay that has lost the test
-   * id does not take a twin for it. A count taken on the look an earlier
-   * action of the step already ran from is marked: that action may have
-   * removed or added a twin, so the count may not be the one a replay sees.
+   * Where a node sat when it was acted on, for the trace: its container (this
+   * row's "Delete", not the next row's), its place among the controls its
+   * description matches, and whether a node its test id tells apart has twins
+   * by its other fields. A count taken on a look an earlier action of the step
+   * ran from is marked: that action may have changed the twins.
    */
   private placementOf({ node, observation }: Resolved): Placement {
     const within = containerKey(node.ref.id, observation.nodes, observation.parents);
     const position = describePosition(node, within, observation.nodes);
-    const placement: Placement = {
+    const twinned = hasTwinsWithoutTestId(node, within, observation.nodes);
+    const earlier = (position !== undefined || twinned) && observation === this.actedFrom;
+    return {
       ...(within === undefined ? {} : { within }),
       ...(position === undefined ? {} : { position }),
-      ...(hasTwinsWithoutTestId(node, within, observation.nodes) ? { twinsWithoutTestId: true } : {}),
+      ...(twinned ? { twinsWithoutTestId: true } : {}),
+      ...(earlier ? { countedOnEarlierLook: true } : {}),
     };
-    const counted = placement.position !== undefined || placement.twinsWithoutTestId !== undefined;
-    return counted && observation === this.actedFrom ? { ...placement, countedOnEarlierLook: true } : placement;
   }
 
   /**

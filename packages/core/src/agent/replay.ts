@@ -450,11 +450,17 @@ async function relocate(
   look: Look,
 ): Promise<Relocated> {
   let last: Relocated = { kind: 'failed', failure: 'target-not-found' };
+  let refused = false;
   const settled = await pollSettled(host, (screen): Relocated | undefined => {
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'failed') {
-      last = result.failure === 'target-not-found' ? result : { ...result, screen };
-      return retryable(result, descriptor) ? undefined : last;
+      // A twin refused once stays refused while this relocation looks again:
+      // look-alikes that show up later are no reason to settle by the point
+      // or to scroll the screen, and only the recorded test id names the node.
+      refused ||= result.failure === 'target-ambiguous' && result.twinLeft === true;
+      const failed = refused && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
+      last = failed.failure === 'target-not-found' ? failed : { ...failed, screen };
+      return retryable(failed, descriptor) ? undefined : last;
     }
     const node = screen.nodes.get(result.id);
     return node === undefined ? undefined : { ...result, node };
@@ -494,15 +500,16 @@ async function relocatePair(
  * Whether a failed relocation is worth another look. A missing target is: the
  * screen may still be settling. So is ambiguity for a descriptor that recorded
  * its position among twins: a form still rendering shows fewer of them than
- * the recording counted, and the count catches up. A lone named match
- * refused as a twin of the recorded node (`twinLeft`) is only when the
- * recorded test id can come back and name the node by itself: a count that
- * catches up would pick by order, and a twin that rendered ahead of the
- * recorded node takes its place. Other ambiguity never is: two matching
- * nodes will not become one by waiting, and acting on either would be a guess.
+ * the recording counted, and the count catches up. A named match refused as
+ * a twin of the recorded node (`twinLeft`) is only when the recorded test id
+ * named the node by itself (no position counted beside it) and can come
+ * back: a count that catches up would pick by order, and a twin that
+ * rendered ahead of the recorded node takes its place. Other ambiguity never
+ * is: two matching nodes will not become one by waiting, and acting on either
+ * would be a guess.
  */
 function retryable(result: Extract<RelocationResult, { kind: 'failed' }>, descriptor: TraceTargetDescriptor): boolean {
-  if (result.failure === 'target-ambiguous' && result.twinLeft === true) return descriptor.twinsWithoutTestId === true;
+  if (result.failure === 'target-ambiguous' && result.twinLeft === true) return descriptor.twinsWithoutTestId === true && descriptor.position === undefined;
   return result.failure === 'target-not-found' || descriptor.position !== undefined;
 }
 

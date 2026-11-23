@@ -97,7 +97,18 @@ describe('trace cache: the recorded control is gone and its twin is left', () =>
     expect(targets['sets up by test id']).toMatchObject({ role: 'button', name: 'Set up', testId: 'setup-primary' });
 
     app.setVariant('b');
+    // Under --strict-cache the step fails as stale, with nothing pressed and no executor call.
+    const strict = await runExisting(project, { ...options(), runOptions: { strictCache: true } });
+    expect(strict.exitCode).toBe(2);
+    for (const title of ['sets up without test ids', 'sets up by test id']) {
+      const step = resultByTitle(strict, title).attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+      expect(step.error?.code, title).toBe('REPLAY_STALE');
+      expect(step.cache, title).toMatchObject({ reason: 'target-ambiguous', replayedActions: 0 });
+    }
+    expect(runs.at(-1)!.statuses).toEqual([]);
+
     const second = await runExisting(project, options());
+    expect(second.exitCode).toBe(0);
     for (const title of ['sets up without test ids', 'sets up by test id']) {
       const step = resultByTitle(second, title).attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
       expect(step.cache, title).toMatchObject({ mode: 'missed', reason: 'target-ambiguous', replayedActions: 0 });
@@ -178,5 +189,56 @@ test('removes both drafts', async ({ app, agent, screen }) => {
     const step = resultByTitle(replayed, 'removes both drafts').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
     expect(step.cache).toMatchObject({ mode: 'self-finalized', replayedActions: 2, totalActions: 2 });
     expect(second.calls[0]).toBeUndefined();
+  }, 240_000);
+});
+
+describe('trace cache: one step presses two twins with a look between', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  /** Presses the first "Set up" button, looks again, then presses the second. */
+  const lookBetween: StepExecutor = {
+    name: 'look-between',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      for (const index of [0, 1]) {
+        const observation = await context.observe();
+        const ids = [...observation.text.matchAll(/#(\S+) button "Set up"/g)].map((match) => match[1]!);
+        await context.actions.tap({ id: ids[index]! });
+      }
+      return { status: 'passed' as const, summary: 'pressed both' };
+    },
+  };
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({
+      'tests/both.e2e.ts': `import { test, expect } from 'e2e';
+
+test('sets up both', async ({ app, agent, screen }) => {
+  await app.open('/setup-twins');
+  await agent.act('set up both integrations');
+  await expect(screen.getByRole('status')).toHaveText('Setup opened');
+});
+`,
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('trusts the count of a press addressed from a fresh look', async () => {
+    const run = await runExisting(project, {
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', reporters: ['json'] as const, workers: 1, agents: { default: { executor: lookBetween } }, cache: 'read-write' as const },
+    });
+    expect(run.exitCode).toBe(0);
+    const [entry] = readEntries(project);
+    expect(entry!.entry.payload.actions.map((action) => (action.name === 'tap' ? action.target : undefined))).toEqual([
+      { role: 'button', name: 'Set up', position: { index: 0, of: 2 } },
+      { role: 'button', name: 'Set up', position: { index: 1, of: 2 } },
+    ]);
   }, 240_000);
 });
