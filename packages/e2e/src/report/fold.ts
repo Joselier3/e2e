@@ -1,19 +1,20 @@
 /**
- * A `--last-failed` rerun and the run it selected from, as one report. The
+ * A `--last-failed` rerun and the runs it selected from, as one report. The
  * rerun's document lists every test the run before it passed as unselected,
- * so the page would show only the few tests it ran again; folding the two
- * gives the comment the whole suite: carried results for the tests the rerun
- * left out, the rerun's results for the rest, and a test that failed and then
- * passed reads as flaky with both runs' attempts. Rendering only: nothing
- * here is written back to a report file.
+ * so on its own it shows only the few tests it ran again; folding the two
+ * gives the whole suite: carried results for the tests the rerun left out,
+ * the rerun's results for the rest, and a test that failed and then passed
+ * reads as flaky with both runs' attempts. The runner writes the fold beside
+ * the rerun's report (`report-with-reruns.json`), and hands it to the next
+ * rerun's reporters as `FinishedRun.lastRun`.
  */
 
-import type { Report } from 'e2e';
+import type { Report1Document as Report } from './build.ts';
+import { summarizeResults } from './summary.ts';
 
 type ReportRun = Report['run'];
 type ReportResult = ReportRun['results'][number];
 type ReportSerialGroup = ReportRun['serialGroups'][number];
-type ReportSummary = ReportRun['summary'];
 
 /** Statuses that count as a failure of the run. `--last-failed` also runs an interrupted test again, but that one reached no verdict. */
 const FAILED_STATUSES = new Set<ReportResult['status']>(['failed', 'timed-out']);
@@ -53,42 +54,6 @@ function foldGroup(current: ReportSerialGroup, before: ReportSerialGroup | undef
   return { ...current, attempts };
 }
 
-/**
- * Whether a serial member's record is a run of its body, a body that skipped
- * itself included. Mirrors `memberRan` in `@e2e-dev/core`'s `run/records.ts`,
- * which the peer range keeps this package from importing.
- */
-function memberRan(member: ReportSerialGroup['attempts'][number]['members'][number]): boolean {
-  return member.status !== 'skipped' || member.skip?.cause === 'explicit' || member.skip?.cause === 'fixme';
-}
-
-/**
- * The counts the way the runner tallies them, over the folded results: the
- * status counts are over the selected ones, and a serial member executed when
- * one of its group's attempts ran its body, a body that skipped itself included.
- */
-function summarize(results: readonly ReportResult[], serialGroups: readonly ReportSerialGroup[], base: ReportSummary): ReportSummary {
-  const summary: ReportSummary = { ...base, discovered: results.length, selected: 0, executed: 0, passed: 0, failed: 0, interrupted: 0, flaky: 0, skipped: 0 };
-  const ranMembers = new Set(
-    serialGroups.flatMap((group) =>
-      group.attempts.flatMap((attempt) =>
-        attempt.members.filter(memberRan).map((member) => `${group.id}\u0000${member.testId}`),
-      ),
-    ),
-  );
-  for (const result of results) {
-    if (result.attempts.length > 0 || (result.serialGroupId !== undefined && ranMembers.has(`${result.serialGroupId}\u0000${result.testId}`))) summary.executed += 1;
-    if (!result.selected) continue;
-    summary.selected += 1;
-    if (result.status === 'passed') summary.passed += 1;
-    else if (result.status === 'flaky') summary.flaky += 1;
-    else if (result.status === 'interrupted') summary.interrupted += 1;
-    else if (FAILED_STATUSES.has(result.status)) summary.failed += 1;
-    else summary.skipped += 1;
-  }
-  return summary;
-}
-
 /** Reads the duration of a pass. Wall time is used for older reports. */
 function runDuration(run: ReportRun): number {
   return run.durationMs ?? Date.parse(run.finishedAt) - Date.parse(run.startedAt);
@@ -107,10 +72,10 @@ function runDuration(run: ReportRun): number {
  * test another filter kept out of the rerun can have, or the rerun carries
  * a test it owed and never ran, a failure limit's skip among them, or a
  * suite hook failure whose scope it did not run again (`run.carried`). Then
- * the page is red, since the suite is not known to pass. A carried test the
- * first pass interrupted reached no verdict: it leaves the outcome alone and
- * the page reads interrupted, not green. The first run's start time is kept.
- * The sum of both run durations is shown in the footer. The rerun takes the run before's filter
+ * the fold fails, since the suite is not known to pass. A carried test the
+ * first pass interrupted reached no verdict: it leaves the outcome alone, and
+ * the fold does not read as a pass. The first run's start time is kept.
+ * Its duration is the sum of both runs'. The rerun takes the run before's filter
  * records and the change they judged, since the rows those filters left out
  * are the run before's too. An `e2e explore` run before leaves the rerun as
  * it is.
@@ -174,7 +139,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       serialGroups,
       results,
       errors: [...current.run.errors, ...carriedErrors],
-      summary: summarize(results, serialGroups, current.run.summary),
+      summary: summarizeResults(results, serialGroups),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
     },

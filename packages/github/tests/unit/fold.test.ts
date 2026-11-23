@@ -1,8 +1,7 @@
 /** A rerun folded into the run before it: what the page shows for each kind of test. */
 
-import { renderMarkdownReport, type Report } from 'e2e';
+import { foldLastRun, renderMarkdownReport, type Report } from 'e2e';
 import { describe, expect, it } from 'vitest';
-import { foldLastRun } from '../../src/merge.ts';
 import { attempt, report, result } from './fixtures.ts';
 
 type ReportSerialGroup = Report['run']['serialGroups'][number];

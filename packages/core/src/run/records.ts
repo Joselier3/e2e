@@ -62,6 +62,11 @@ export type SkipInfo =
 interface SkipDetail {
   readonly reason: string;
   readonly relatedId?: string;
+  /**
+   * Set on an unselected test of a sharded run (`--shard`) that another
+   * shard runs or reports: the shard cut it, whatever the reason says.
+   */
+  readonly otherShard?: true;
 }
 
 export type ArtifactProducer = { kind: 'step'; stepId: string } | { kind: 'attempt' };

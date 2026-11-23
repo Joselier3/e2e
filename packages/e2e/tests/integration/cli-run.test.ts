@@ -116,6 +116,55 @@ describe('the run command through the CLI', () => {
     expect(executed.map((result) => result.titlePath.at(-1)).toSorted()).toEqual(['sign in', ...tests(second)].toSorted());
   });
 
+  it('records which shard a report is, and marks every row another shard runs or reports, a skipped test included', () => {
+    const sharded = fixture({
+      'e2e.config.ts': fakeConfig(),
+      'tests/shop.e2e.ts': `import { test } from 'e2e';
+for (const title of ['a', 'b']) test(title, async ({ app }) => { await app.open(); });
+test.skip('parked', async () => {});
+for (const title of ['c', 'd', 'excluded']) test(title, async ({ app }) => { await app.open(); });
+`,
+    });
+    /** Each row as [title, selected, skip cause, marked as another shard's]. */
+    const rows = (shard: string) => {
+      const ran = rerun(sharded, ['run', '--shard', shard, '--grep-invert', 'excluded']);
+      expect(ran.exitCode).toBe(0);
+      const report = reportOf(sharded);
+      return {
+        shard: report.run.shard,
+        rows: report.run.results.map((result) => [result.titlePath.at(-1), result.selected, result.skip?.cause, result.skip?.otherShard === true]),
+      };
+    };
+    // a, b, c, d are the items; 'parked' goes with the shard holding b, and --grep-invert leaves 'excluded' out of both.
+    expect(rows('1/2')).toEqual({
+      shard: { index: 1, total: 2 },
+      rows: [
+        ['a', true, undefined, false],
+        ['b', true, undefined, false],
+        ['parked', true, 'explicit', false],
+        ['c', false, 'filtered', true],
+        ['d', false, 'filtered', true],
+        ['excluded', false, 'filtered', false],
+      ],
+    });
+    expect(rows('2/2')).toEqual({
+      shard: { index: 2, total: 2 },
+      rows: [
+        ['a', false, 'filtered', true],
+        ['b', false, 'filtered', true],
+        ['parked', false, 'explicit', true],
+        ['c', true, undefined, false],
+        ['d', true, undefined, false],
+        ['excluded', false, 'filtered', false],
+      ],
+    });
+    // A run that is not sharded says nothing about shards.
+    expect(rerun(sharded, ['run']).exitCode).toBe(0);
+    const whole = reportOf(sharded);
+    expect(whole.run.shard).toBeUndefined();
+    expect(whole.run.results.some((result) => result.skip?.otherShard !== undefined)).toBe(false);
+  });
+
   it('fails a wrong locator and a wrong expectation at the timeout flags, not the config\'s, and a call\'s own timeout still wins', () => {
     const { project, exitCode } = cli(
       {

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import type { Report1Document } from '../../src/report/build.ts';
-import { carryForward, fileDurationKey, lastFailedIds, previousFileDurations, readLastRun, reportArtifactPaths } from '../../src/run/last-run.ts';
+import { carryForward, fileDurationKey, lastFailedIds, previousFileDurations, readLastRun, readWithReruns, reportArtifactPaths } from '../../src/run/last-run.ts';
 
 /** Temp roots this file creates. A list, not one `dir`: a case may make several, and
  * `reportFile` is called more than once inside a case, so a single variable drops the
@@ -67,6 +67,24 @@ const leftOut = (id: string, reason = 'title does not match --grep'): Row => ({ 
 
 const idOf = (testId: string) => resultId(testId, 'web', 'default');
 const readLastFailed = async (file: string): Promise<ReadonlySet<string>> => lastFailedIds(await readLastRun(file));
+
+describe('readWithReruns', () => {
+  const lastRun = document([{ id: 'a', status: 'failed' }], [], { id: 'run-2' });
+
+  it('reads the whole run only when it is a report of the same run as report.json', async () => {
+    const same = reportFile(report([{ id: 'a', status: 'failed' }, { id: 'b', status: 'passed' }], [], { id: 'run-2' }));
+    expect((await readWithReruns(same, lastRun))?.run.results.map((result) => result.testId)).toEqual(['a', 'b']);
+    // A report.json downloaded from CI beside a file an earlier local rerun left.
+    expect(await readWithReruns(reportFile(report([{ id: 'b', status: 'passed' }], [], { id: 'run-1' })), lastRun)).toBeUndefined();
+  });
+
+  it('is no history when the file is missing, unreadable, or not a report', async () => {
+    const missing = path.join(path.dirname(reportFile('{}')), 'absent.json');
+    expect(await readWithReruns(missing, lastRun)).toBeUndefined();
+    expect(await readWithReruns(reportFile('{ not json'), lastRun)).toBeUndefined();
+    expect(await readWithReruns(reportFile(JSON.stringify({ schemaVersion: 'report-1', run: { id: 'run-2' } })), lastRun)).toBeUndefined();
+  });
+});
 
 describe('readLastRun and lastFailedIds', () => {
   it('collects the ids of the results that did not pass or that the run never carried out', async () => {

@@ -441,7 +441,8 @@
         },
         "reason": { "type": "string", "maxLength": 8192 },
         "relatedId": { "type": "string", "minLength": 1 },
-        "filter": { "description": "The name of the test filter that left the test out; only with cause filtered.", "type": "string", "minLength": 1, "maxLength": 256 }
+        "filter": { "description": "The name of the test filter that left the test out; only with cause filtered.", "type": "string", "minLength": 1, "maxLength": 256 },
+        "otherShard": { "description": "Set on an unselected result of a sharded run (run.shard) when another shard runs or reports the test: the shard cut it, whatever the cause and reason say. Absent otherwise.", "const": true }
       },
       "allOf": [
         { "if": { "required": ["filter"] }, "then": { "properties": { "cause": { "const": "filtered" } } } }
@@ -752,6 +753,16 @@
             "commit": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
             "branch": { "type": "string", "minLength": 1, "maxLength": 512 },
             "dirty": { "type": "boolean" }
+          }
+        },
+        "shard": {
+          "description": "Which shard of the selection the run was (--shard index/total); absent when it was not sharded. Each shard's report lists the whole selection and marks the tests another shard runs or reports with skip.otherShard.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["index", "total"],
+          "properties": {
+            "index": { "type": "integer", "minimum": 1 },
+            "total": { "type": "integer", "minimum": 1 }
           }
         },
         "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },

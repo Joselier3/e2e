@@ -95,6 +95,23 @@ export async function readLastRun(reportPath: string): Promise<Report1Document> 
 }
 
 /**
+ * The runs before a `--last-failed` rerun, folded into one: the
+ * `report-with-reruns.json` the last run wrote when it was a rerun itself,
+ * and undefined when there is none, or it is not a report of the same run as
+ * `lastRun` (`report.json`): a run that stopped part way, or a file left by
+ * another tool. Like the timings history the file only adds to the report,
+ * so one that cannot be read is no history.
+ */
+export async function readWithReruns(filePath: string, lastRun: Report1Document): Promise<Report1Document | undefined> {
+  try {
+    const document: unknown = JSON.parse(await readFile(filePath, 'utf8'));
+    return isReport(document) && document.run.id === lastRun.run.id ? document : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The result ids of a report's tests that did not pass: failed, timed out,
  * interrupted, or skipped because a setup, a serial predecessor, a hook, the
  * worker, or the failure limit stopped it, every selected test in the scope
