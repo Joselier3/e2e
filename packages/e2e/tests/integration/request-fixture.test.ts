@@ -260,6 +260,10 @@ test('a malformed connection header', async ({ request }) => {
   await request.get('/api/refused-options', { headers: { connection: 'close,' } });
 });
 
+test('a header value that is not a string', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: { 'x-count': 3 as never } });
+});
+
 test('headers as a Headers object', async ({ request }) => {
   await request.get('/api/refused-options', { headers: new Headers({ authorization: 'Bearer t' }) as never });
 });
@@ -318,6 +322,7 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
     expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
     expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
+    expect(errorOf('a header value that is not a string')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "x-count" must be a string' });
     expect(errorOf('a host header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Host" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('POST /api/refused-options: fetch refused the request: invalid transfer-encoding header') });
@@ -413,11 +418,27 @@ test('a long path', async ({ request }) => {
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
-    assertValidReport(outcome.report);
     const [step] = resultByTitle(outcome, 'a long path').attempts[0]!.steps;
     expect(step!.label).toHaveLength(8192);
     expect(step!.label.endsWith('…')).toBe(true);
+    assertValidReport(outcome.report);
     expect(api.paths).toContain('/files/' + 'x'.repeat(9000));
+  });
+
+  it('redacts a secret before it cuts a long label, so no part of it is shown', async () => {
+    const secret = 'zq-straddle-secret-7731';
+    // "GET /files/" is 11 characters, so the secret starts at 8181 and runs past the cut at 8191.
+    const file = `import { test } from 'e2e';
+
+test('a secret across the cut', async ({ request }) => {
+  await request.get('/files/' + 'x'.repeat(8170) + '${secret}');
+});
+`;
+    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
+    const [step] = resultByTitle(outcome, 'a secret across the cut').attempts[0]!.steps;
+    expect(step!.label).toHaveLength(8192);
+    expect(step!.label).not.toContain(secret.slice(0, 10));
+    expect(JSON.stringify(outcome.report)).not.toContain(secret.slice(0, 10));
   });
 
   it('is a name no engine may contribute', () => {
