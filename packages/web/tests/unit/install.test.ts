@@ -24,6 +24,29 @@ describe('browserCheck', () => {
     expect(await browserCheck('firefox', {}, false, async () => false)).toEqual(firstRun);
     expect(await browserCheck('chromium', {}, false, async () => undefined)).toEqual([]);
   });
+
+  it('fails an installed browser whose system libraries do not resolve, with the install that adds them', async () => {
+    expect(await browserCheck('chromium', {}, false, () => true, () => ['libnss3.so', 'libgbm.so.1'])).toEqual([
+      {
+        id: 'browser',
+        status: 'fail',
+        message:
+          'chromium cannot launch: 2 system libraries are missing (libnss3.so, libgbm.so.1); run "npx @e2e-dev/web install chromium --with-deps" (pnpm: "pnpm exec e2e-web install chromium --with-deps")',
+      },
+    ]);
+    expect(await browserCheck('chromium', {}, false, () => true, async () => [])).toEqual([{ id: 'browser', status: 'pass', message: 'chromium is installed' }]);
+  });
+
+  it('does not look for libraries of a browser that is not installed', async () => {
+    const asked: BrowserName[] = [];
+    const missing = (name: BrowserName) => {
+      asked.push(name);
+      return ['libnss3.so'];
+    };
+    expect(await browserCheck('firefox', {}, false, () => false, missing)).toEqual(firstRun);
+    expect(await browserCheck('firefox', {}, false, () => undefined, missing)).toEqual([]);
+    expect(asked).toEqual([]);
+  });
 });
 
 describe('ensureBrowsersInstalled', () => {

@@ -54,7 +54,8 @@ import { LeasedBrowsers, type BrowserProvider, type LeaseDownloads } from './pro
 import { installAppLog } from './app-log.ts';
 import { TraceFeed } from './trace-feed.ts';
 import { DialogRouter } from './dialogs.ts';
-import { browserCheck, ensureBrowsersInstalled } from './install.ts';
+import { missingLibrariesMessage } from './host-libraries.ts';
+import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
 import { applyPostSteps, frameSelectors, projectExpression } from './locators.ts';
 import { contentBox, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode } from './observation.ts';
 import { captureObservation } from './observation-capture.ts';
@@ -460,7 +461,9 @@ export class PlaywrightSurface {
       );
     } catch (cause) {
       if (cause instanceof EngineError) throw cause;
-      throw new EngineError('ENGINE_FAILURE', `browser ${verb} failed: ${message(cause)}`, {
+      const missing = verb === 'launch' ? await missingBrowserLibraries(this.browserName, process.env, this.headed) : [];
+      const reason = missing.length > 0 ? missingLibrariesMessage(this.browserName, missing) : message(cause);
+      throw new EngineError('ENGINE_FAILURE', `browser ${verb} failed: ${reason}`, {
         retryable: false,
         cause,
       });
