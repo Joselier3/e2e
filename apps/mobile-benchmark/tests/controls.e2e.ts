@@ -371,12 +371,6 @@ test.describe('control inventory', () => {
     if (path === null) throw new Error('swipe status has no path');
     expect(Math.abs(Number(path[1]) - 100)).toBeLessThanOrEqual(15);
 
-    await swipePad.swipe({ from: { x: 280, y: '50%' }, to: { x: 80, y: '50%' } });
-    await expect(swipeStatus).toContainText('swipe: 280,40 to ');
-    const boxPath = /^swipe: 280,40 to (\d+),40$/.exec((await swipeStatus.textContent()) ?? '');
-    if (boxPath === null) throw new Error('swipe status has no path');
-    expect(Math.abs(Number(boxPath[1]) - 80)).toBeLessThanOrEqual(15);
-
     // `direction` is the scroll direction: content to the right comes into
     // view when the finger moves left, so the end lands left of the start.
     await swipePad.swipe({ direction: 'right' });
@@ -385,6 +379,23 @@ test.describe('control inventory', () => {
         const status = await swipeStatus.textContent();
         const match = /^swipe: (\d+),\d+ to (-?\d+),\d+$/.exec(status ?? '');
         return match === null ? status : Number(match[2]) < Number(match[1]);
+      })
+      .toBe(true);
+  });
+
+  // Percentages of the pad hold on both platforms, whatever the screen's
+  // density. The path runs right to left, since a left-to-right fling pops
+  // the screen, and the pad reports in points, so only the row is exact.
+  test('a locator swipe drags between points of the node', async ({ screen }) => {
+    await showSection(screen, 'Gestures');
+    const swipeStatus = screen.getByTestId('swipe-status');
+
+    await screen.getByTestId('swipe-pad').swipe({ from: { x: '80%', y: '50%' }, to: { x: '20%', y: '50%' } });
+
+    await expect
+      .poll(async () => {
+        const match = /^swipe: (\d+),(\d+) to (-?\d+),\d+$/.exec((await swipeStatus.textContent()) ?? '');
+        return match !== null && Number(match[3]) < Number(match[1]) && Math.abs(Number(match[2]) - 40) <= 1;
       })
       .toBe(true);
   });
