@@ -124,7 +124,7 @@ export interface CtrfReportOptions {
   readonly redact?: ((text: string) => string) | undefined;
 }
 
-/** Turns report text into what the file may carry: redacted, then with terminal controls replaced. */
+/** Turns report text into what the file may carry: redacted, terminal controls replaced, then redacted again. */
 type Clean = (text: string) => string;
 
 /** `CODE (phase): message`, as `junit` writes it, with the session a failed step ran on when it is not the test's own. */
@@ -276,8 +276,10 @@ function renderRetryAttempt(view: AttemptView, number: number, options: CtrfRepo
  * for the outcome's verdict attempt, the last that reached the result's
  * verdict. A serial group attempt that never reached the member is not its
  * attempt: when the verdict attempt is one of those (a retry skipped the
- * member), the test stands for no attempt, and the ones it ran before are
- * history.
+ * member), the test stands for that skipped attempt, with no timing or
+ * evidence of its own, and the ones it ran before are its retryAttempts.
+ * CTRF retry entries can be `skipped`, so the skip counts as the final
+ * attempt: `retries + 1` attempts in all.
  */
 function representedAttempts(views: readonly AttemptView[], verdict: AttemptView): { before: AttemptView[]; represented: AttemptView | undefined; after: number } {
   const at = views.indexOf(verdict);
@@ -299,7 +301,8 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
     result.serialGroupId === undefined
       ? result.status === 'flaky'
       : represented?.status === 'passed' && before.some((attempt) => attempt.status === 'failed' || attempt.status === 'timed-out');
-  const expected = result.attempts.at(-1)?.expectedFailure;
+  // The represented attempt's mark: a retry the run cut after it set none of its own.
+  const expected = result.attempts.find((attempt) => attempt.id === represented?.id)?.expectedFailure;
   const error = represented?.error;
   const message =
     result.status === 'skipped'
@@ -344,11 +347,12 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
   };
 }
 
-/** `osPlatform` and `osRelease` from report-1's `os`, which joins them with a space. */
+/** `osPlatform` and `osRelease` from report-1's `os`, which joins them with a space; redacted before the cut, so no value spans the two. */
 function osFields(os: string, clean: Clean): Record<string, string> {
-  const space = os.indexOf(' ');
-  if (space === -1) return { osPlatform: clean(os) };
-  return { osPlatform: clean(os.slice(0, space)), osRelease: clean(os.slice(space + 1)) };
+  const text = clean(os);
+  const space = text.indexOf(' ');
+  if (space === -1) return { osPlatform: text };
+  return { osPlatform: text.slice(0, space), osRelease: text.slice(space + 1) };
 }
 
 /**
@@ -377,7 +381,7 @@ export function renderCtrfReport(report: Report1Document, options: CtrfReportOpt
     reportFormat: 'CTRF',
     specVersion: SPEC_VERSION,
     reportId: run.id,
-    timestamp: run.finishedAt ?? run.startedAt,
+    timestamp: run.finishedAt,
     generatedBy: 'e2e',
     results: {
       tool: { name: 'e2e', version: clean(run.runner.version) },

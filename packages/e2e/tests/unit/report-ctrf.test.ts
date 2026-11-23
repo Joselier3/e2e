@@ -200,6 +200,20 @@ describe('renderCtrfReport', () => {
     expect(test!.attachments.map((file: Json) => file.name)).toEqual(['screenshot-first']);
   });
 
+  it('keeps the expected failure of the represented attempt when a retry the run cut after it set none', () => {
+    const marked = reportAttempt({ id: 'attempt-1', status: 'failed', error: reportError({ code: 'UNEXPECTED_PASS' }), expectedFailure: { reason: 'known bug' } });
+    const cut = reportAttempt({ id: 'attempt-2', index: 1, status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED' }) });
+    const [test] = tests(doc({ results: [reportResult({ status: 'failed', attempts: [marked, cut] })] }));
+    expect(test).toMatchObject({ attemptId: 'attempt-1', extra: { [KEY]: { cutAttempts: 1, expectedFailure: { reason: 'known bug' } } } });
+  });
+
+  it('redacts the OS string before splitting it, so a value spanning the space is caught', () => {
+    const redact = (text: string): string => text.replaceAll('darwin 25', '<secret:probe>');
+    const document = render(doc({ environment: { ci: false, trustNoticeShown: false, os: 'darwin 25.1.0', arch: 'arm64', runtime: 'node' } }), { redact });
+    expect(document.results.environment).toMatchObject({ osPlatform: '<secret:probe>.1.0' });
+    expect(JSON.stringify(document.results.environment)).not.toContain('darwin');
+  });
+
   it('marks a pass under test.fail with the expected failure it covered', () => {
     const attempt = reportAttempt({ expectedFailure: { reason: 'known bug', error: reportError({ code: 'ASSERTION_FAILED', message: 'still broken' }) } });
     const [test] = tests(doc({ results: [reportResult({ attempts: [attempt] })] }));
@@ -491,7 +505,7 @@ describe('renderCtrfReport', () => {
       expect(adds).toMatchObject({ flaky: true, retries: 1 });
     });
 
-    it('keeps a member a later retry skipped as skipped, standing for no attempt, with the attempt it ran and failed as history', () => {
+    it('keeps a member a later retry skipped as skipped, standing for that skipped attempt, with the attempt it ran and failed as its retryAttempts', () => {
       const skip = { cause: 'serial-predecessor-failed' as const, reason: 'an earlier test in the serial group failed' };
       const failShot = artifact('pays-failure');
       const first = groupAttempt(

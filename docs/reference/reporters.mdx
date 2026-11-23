@@ -218,6 +218,7 @@ reporters: ['list', 'ctrf'],
   that reads `retries` as flakiness counts it as flaky, while `flaky` stays
   unset. A test a retry skipped stands for that skipped attempt: no
   timing or attachments, and the attempts it ran are its `retryAttempts`.
+  A tool that counts `retries + 1` runs counts the skipped attempt too.
 - `status` is CTRF's `passed`, `failed`, `skipped`, or `other`. `rawStatus`
   keeps e2e's own: `timed-out` is `failed`, `interrupted` is `other`.
 - Run errors, such as a failed `afterAll`, go in `results.errors` and never
