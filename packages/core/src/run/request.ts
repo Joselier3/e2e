@@ -113,12 +113,6 @@ async function exchange(url: URL, init: RequestInit, label: string, signal: Abor
   } catch (cause) {
     // An abort is the budget's or the timeout's: the wrappers above report it.
     if (signal.aborted) throw cause;
-    const inner = cause instanceof Error && cause.cause instanceof Error ? cause.cause : undefined;
-    const code: unknown = inner === undefined ? undefined : Reflect.get(inner, 'code');
-    if (inner !== undefined && typeof code === 'string' && REFUSED_REQUEST_CODES.has(code)) {
-      // Undici checked a header or the body against the request and sent nothing.
-      throw new TestError('INVALID_ARGUMENT', `${label}: fetch refused the request: ${inner.message}`, { cause });
-    }
     throw new TestError('ACTION_FAILED', `${label} failed: ${networkReason(cause)}`, { cause });
   }
 }
@@ -148,8 +142,14 @@ const UNSENDABLE_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
 /** The headers Node's fetch sets, overwrites, or drops, so the test would not send what it names. */
 const OVERWRITTEN_HEADERS = new Set(['content-length', 'host', 'sec-fetch-mode']);
 
-/** Undici's codes for a request it refuses to send, as opposed to a network failure. */
-const REFUSED_REQUEST_CODES = new Set(['UND_ERR_INVALID_ARG', 'UND_ERR_NOT_SUPPORTED', 'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH']);
+/**
+ * The headers Node's fetch refuses to send. They are refused here by name, so
+ * a runtime whose fetch would send them (Bun) refuses them the same way.
+ */
+const UNSENDABLE_HEADERS = new Set(['expect', 'keep-alive', 'transfer-encoding', 'upgrade']);
+
+/** The `connection` values sent as written: Node's fetch sends `close` for any value listing it, else `keep-alive`. */
+const CONNECTION_VALUES = new Set(['close', 'keep-alive']);
 
 /**
  * The URL a call goes to: a path resolved against the app URL as `app.open`
@@ -200,8 +200,15 @@ function requestInit(api: string, method: string, options: APIRequestOptions | u
   const headers = new Headers();
   for (const [name, value] of Object.entries(given ?? {})) {
     if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be a string`);
-    if (OVERWRITTEN_HEADERS.has(name.toLowerCase())) {
+    const lower = name.toLowerCase();
+    if (OVERWRITTEN_HEADERS.has(lower)) {
       throw new TestError('INVALID_ARGUMENT', `request: header "${name}" is set by fetch itself; leave it out`);
+    }
+    if (UNSENDABLE_HEADERS.has(lower)) {
+      throw new TestError('INVALID_ARGUMENT', `request: header "${name}" cannot be sent with fetch; leave it out`);
+    }
+    if (lower === 'connection' && !CONNECTION_VALUES.has(value.trim().toLowerCase())) {
+      throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be close or keep-alive; fetch manages the connection`);
     }
     try {
       validateHeaderName(name);

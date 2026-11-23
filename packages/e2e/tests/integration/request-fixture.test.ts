@@ -45,7 +45,7 @@ async function startApi(): Promise<Api> {
       request.resume();
       response.setHeader('x-method', request.method ?? '');
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ method: request.method, cookie: request.headers.cookie ?? null, contentType: request.headers['content-type'] ?? null }));
+      response.end(JSON.stringify({ method: request.method, cookie: request.headers.cookie ?? null, connection: request.headers.connection ?? null, contentType: request.headers['content-type'] ?? null }));
       return;
     }
     if (url.pathname === '/api/slow') {
@@ -130,8 +130,8 @@ test('creates an order', async ({ request }) => {
     expect((await (await call('/api/echo')).json()).method).toBe(method);
   }
   expect((await request.head('/api/echo')).headers['x-method']).toBe('HEAD');
-  const echoed = await (await request.post('/api/echo', { body: '{"raw":1}', headers: { cookie: 'session=abc' } })).json();
-  expect(echoed).toEqual({ method: 'POST', cookie: 'session=abc', contentType: 'text/plain;charset=UTF-8' });
+  const echoed = await (await request.post('/api/echo', { body: '{"raw":1}', headers: { cookie: 'session=abc', connection: 'Close' } })).json();
+  expect(echoed).toEqual({ method: 'POST', cookie: 'session=abc', connection: 'close', contentType: 'text/plain;charset=UTF-8' });
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
@@ -274,8 +274,12 @@ test('a header fetch refuses', async ({ request }) => {
   await request.post('/api/refused-options', { body: 'a', headers: { 'Transfer-Encoding': 'chunked' } });
 });
 
-test('a malformed connection header', async ({ request }) => {
-  await request.get('/api/refused-options', { headers: { connection: 'close,' } });
+test('a connection header fetch would replace', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: { connection: 'upgrade' } });
+});
+
+test('an expect header', async ({ request }) => {
+  await request.post('/api/refused-options', { body: 'a', headers: { Expect: '100-continue' } });
 });
 
 test('a body that is not JSON', async ({ request }) => {
@@ -350,8 +354,9 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a content-length header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "content-length" is set by fetch itself; leave it out' });
     expect(errorOf('a host header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Host" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });
-    expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('POST /api/refused-options: fetch refused the request: invalid transfer-encoding header') });
-    expect(errorOf('a malformed connection header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('fetch refused the request: invalid connection header') });
+    expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Transfer-Encoding" cannot be sent with fetch; leave it out' });
+    expect(errorOf('an expect header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Expect" cannot be sent with fetch; leave it out' });
+    expect(errorOf('a connection header fetch would replace')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "connection" must be close or keep-alive; fetch manages the connection' });
     expect(api.paths).not.toContain('/api/refused-options');
     const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
     expect(refusal.error, JSON.stringify(refusal.error)).toBeUndefined();

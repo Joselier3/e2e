@@ -121,7 +121,7 @@ URL goes where it names, on any target.
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
 | `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. Also a `Secret` in `json`. |
-| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `content-length`, `host`, or `sec-fetch-mode`, which `fetch` sets itself, a header `fetch` refuses to send (a malformed `connection`, `expect`, `keep-alive`, `transfer-encoding`, or `upgrade`), `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `content-length`, `host`, or `sec-fetch-mode`, which `fetch` sets itself, the header is `expect`, `keep-alive`, `transfer-encoding`, or `upgrade`, which `fetch` cannot send, a `connection` header other than `close` or `keep-alive`, `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
 
