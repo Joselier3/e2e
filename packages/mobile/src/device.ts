@@ -202,6 +202,14 @@ export interface Device {
    * `UNSUPPORTED_CAPABILITY`. A name outside the list is `INVALID_ARGUMENT`.
    */
   pressRemote(key: RemoteKey): Promise<void>;
+  /**
+   * Shakes the device once: the simulator's shake gesture on an iPhone or
+   * iPad simulator, a swing of the accelerometer on an Android phone or
+   * tablet emulator. `UNSUPPORTED_CAPABILITY` on a physical device and on a
+   * device a provider drives through its own backend. It resolves once the
+   * shake is sent, so assert on what the app shows next.
+   */
+  shake(): Promise<void>;
   /** Accepts or dismisses the visible system alert. */
   alert(action: 'accept' | 'dismiss'): Promise<void>;
   /**
@@ -391,6 +399,9 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
       const input = surface.inputBudget('device.pressRemote', { timeoutMs: context.timeouts.action, signal: context.signal });
       await surface.screenCommand('device.pressRemote', (client) => input.send(() => pressRemote(client, key, surface.selection())), context.signal);
     },
+    async shake() {
+      await surface.screenCommand('device.shake', (client) => client.command.shake(surface.selection()), context.signal);
+    },
     async alert(action) {
       await surface.screenCommand('device.alert', (client) => client.command.alert({ ...surface.selection(), action }), context.signal);
     },
@@ -436,6 +447,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     home: action,
     back: action,
     pressRemote: { ...action, label: (key) => key },
+    shake: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
     isKeyboardShown: action,

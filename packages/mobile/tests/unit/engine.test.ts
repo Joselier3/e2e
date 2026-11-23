@@ -3015,7 +3015,7 @@ describe('device fixture', () => {
     expect(h.fake.lastArgs('interactions.scroll')).toEqual({ direction: 'down', postGestureStabilization: false });
   });
 
-  it('counts a back, home, remote press, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
+  it('counts a back, home, remote press, shake, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });
     await openAttempt(h);
@@ -3026,6 +3026,7 @@ describe('device fixture', () => {
       () => device.home(),
       () => device.pressRemote('menu'),
       () => remoteTool(h, 'select'),
+      () => device.shake(),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),
@@ -3154,6 +3155,7 @@ describe('device fixture', () => {
     expect(await device.foregroundApp()).toEqual({ name: 'Settings', bundleId: 'com.apple.Preferences' });
     await device.home();
     await device.back();
+    await device.shake();
     await device.alert('accept');
     await device.dismissKeyboard();
     expect(await device.clipboard()).toBe('pasted');
@@ -3174,6 +3176,7 @@ describe('device fixture', () => {
       ['command.appState', {}],
       ['command.home', { platform: 'ios' }],
       ['command.back', { settle: true, settleQuietMs: 150 }],
+      ['command.shake', { platform: 'ios' }],
       ['command.alert', { platform: 'ios', action: 'accept' }],
       ['command.keyboard', { action: 'dismiss' }],
       ['command.clipboard', { platform: 'ios', action: 'read' }],
@@ -3534,6 +3537,25 @@ describe('device fixture', () => {
     const count = android.fake.calls.length;
     await expect(fixture(android).clearKeychain()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
     expect(android.fake.calls.length).toBe(count);
+  });
+
+  it('shakes the selected simulator or emulator, and maps agent-device\'s refusal of a physical device to UNSUPPORTED_CAPABILITY with its hint', async () => {
+    const android = harness({ platform: 'android', device: 'emulator-5554', bundleId: 'com.example.app' });
+    await openAttempt(android);
+    await expect(fixture(android).shake()).resolves.toBeUndefined();
+    expect(android.fake.lastArgs('command.shake')).toEqual({ platform: 'android', serial: 'emulator-5554' });
+
+    const phone = harness({ platform: 'android', device: 'R58M123ABC', bundleId: 'com.example.app' });
+    await openAttempt(phone);
+    // agent-device 0.21.42's own refusal: the message names no reason, the details do.
+    const hint = 'shake overrides the accelerometer through the Android emulator console; a physical device has no console, so shake it by hand.';
+    phone.fake.respond('command.shake', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'Runtime operation shake is unavailable', { reason: 'unsupported-device-kind', hint });
+    });
+    await expect(fixture(phone).shake()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining(hint),
+    });
   });
 
   it('folds an iOS simulator or an Android emulator through the one device command, and maps a hingeless device to UNSUPPORTED_CAPABILITY', async () => {
