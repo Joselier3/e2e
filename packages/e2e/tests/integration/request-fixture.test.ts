@@ -41,6 +41,17 @@ async function startApi(): Promise<Api> {
       response.end('ok');
       return;
     }
+    if (url.pathname === '/api/echo') {
+      request.resume();
+      response.setHeader('x-method', request.method ?? '');
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ method: request.method, cookie: request.headers.cookie ?? null, contentType: request.headers['content-type'] ?? null }));
+      return;
+    }
+    if (url.pathname === '/api/slow') {
+      setTimeout(() => response.end('slow'), 600);
+      return;
+    }
     if (url.pathname === '/api/stall-body') {
       response.writeHead(200, { 'content-type': 'text/plain' });
       response.write('partial');
@@ -101,6 +112,12 @@ test('creates an order', async ({ request }) => {
   const missing = await request.fetch('/api/missing', { method: 'delete' });
   expect(missing.status).toBe(404);
   expect(await missing.text()).toBe('DELETE');
+  for (const [method, call] of [['PUT', request.put], ['PATCH', request.patch], ['DELETE', request.delete]] as const) {
+    expect((await (await call('/api/echo')).json()).method).toBe(method);
+  }
+  expect((await request.head('/api/echo')).headers['x-method']).toBe('HEAD');
+  const echoed = await (await request.post('/api/echo', { body: '{"raw":1}', headers: { cookie: 'session=abc' } })).json();
+  expect(echoed).toEqual({ method: 'POST', cookie: 'session=abc', contentType: 'text/plain;charset=UTF-8' });
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
@@ -112,6 +129,11 @@ test('creates an order', async ({ request }) => {
       { kind: 'resource', api: 'request.get', label: 'GET /api/cookies', status: 'passed' },
       { kind: 'resource', api: 'request.get', label: 'GET /api/proto', status: 'passed' },
       { kind: 'resource', api: 'request.fetch', label: 'DELETE /api/missing', status: 'passed' },
+      { kind: 'resource', api: 'request.put', label: 'PUT /api/echo', status: 'passed' },
+      { kind: 'resource', api: 'request.patch', label: 'PATCH /api/echo', status: 'passed' },
+      { kind: 'resource', api: 'request.delete', label: 'DELETE /api/echo', status: 'passed' },
+      { kind: 'resource', api: 'request.head', label: 'HEAD /api/echo', status: 'passed' },
+      { kind: 'resource', api: 'request.post', label: 'POST /api/echo', status: 'passed' },
     ]);
   });
 
@@ -222,6 +244,10 @@ test('an option request does not take', async ({ request }) => {
   await request.post('/api/refused-options', { data: { sku: 'A1' }, params: { id: '17' } } as never);
 });
 
+test('a host header', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: { Host: 'tenant-a.example.test' } });
+});
+
 test('a header fetch sets itself', async ({ request }) => {
   await request.get('/api/refused-options', { headers: { 'Sec-Fetch-Mode': 'navigate' } });
 });
@@ -292,6 +318,7 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
     expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
     expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
+    expect(errorOf('a host header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Host" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('POST /api/refused-options: fetch refused the request: invalid transfer-encoding header') });
     expect(errorOf('a malformed connection header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('fetch refused the request: invalid connection header') });
@@ -342,6 +369,39 @@ test('leaks nothing', async ({ request }) => {
     expect(attempt.error?.code).toBe('ASSERTION_FAILED');
     expect(attempt.steps.map((step) => step.label)).toEqual(['GET /api/missing/<secret:TOKEN>']);
     expect(JSON.stringify(outcome.report)).not.toContain(secret);
+  });
+
+  it('waits past the action timeout with timeout 0', async () => {
+    const file = `import { test, expect } from 'e2e';
+
+test('no own timeout', async ({ request }) => {
+  expect(await (await request.get('/api/slow', { timeout: 0 })).text()).toBe('slow');
+});
+
+test('the action timeout', async ({ request }) => {
+  await request.get('/api/slow');
+});
+`;
+    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ actionTimeout: 300 }) });
+    const unbounded = resultByTitle(outcome, 'no own timeout');
+    expect(unbounded.status, JSON.stringify(unbounded.attempts[0]?.error)).toBe('passed');
+    expect(resultByTitle(outcome, 'the action timeout').attempts[0]!.error?.message).toContain('GET /api/slow exceeded its timeout of 300ms');
+  });
+
+  it('refuses a worker-scoped project fixture named request at collection', async () => {
+    const support = `import { test as base } from 'e2e';
+export const test = base.extend<{}, { request: { hello(): string } }>({
+  request: [async ({}, use) => { await use({ hello: () => 'mine' }); }, { scope: 'worker' }],
+});
+`;
+    const file = `import { test } from './support.ts';
+test('uses it', async ({ request }) => { void request; });
+`;
+    const { outcome } = await runProject({ 'tests/support.ts': support, 'tests/api.e2e.ts': file }, { config: onApi() });
+    expect(outcome.report.run.errors).toEqual([expect.objectContaining({
+      code: 'COLLECTION_ERROR',
+      message: expect.stringContaining('fixture "request" is declared with scope \'worker\', but it extends the built-in "request", a test fixture'),
+    })]);
   });
 
   it('cuts a step label to what the report admits, and sends the whole URL', async () => {

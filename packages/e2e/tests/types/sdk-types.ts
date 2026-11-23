@@ -1237,6 +1237,8 @@ test('request', async ({ request }) => {
   // @ts-expect-error a body is a string; an object goes in json
   await request.post('/api/orders', { body: { sku: 'A1' } });
 });
+// @ts-expect-error a project fixture typed as its own `request` conflicts with the built-in one
+test.extend<{ request: { hello(): string } }>({ request: async ({}, use) => { await use({ hello: () => 'mine' }); } });
 // @ts-expect-error request is a test fixture, so a worker fixture cannot name it
 test.extend<{}, { seeded: number }>({ seeded: [async ({ request }, use) => { void request; await use(1); }, { scope: 'worker' }] });
 // @ts-expect-error A function isn't inferred from a return-only generic.

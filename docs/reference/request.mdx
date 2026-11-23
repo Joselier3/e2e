@@ -67,8 +67,11 @@ A `GET` or `HEAD` request takes no body.
 - `json` is sent through `JSON.stringify`, with
   `content-type: application/json` unless `headers` sets a content type. It
   takes JSON-safe values only: plain objects, arrays, strings, finite
-  numbers, booleans, and `null`. A `secrets.get()` handle in it is refused.
-- `body` is sent as is. Pass `json` or `body`, not both. Form, multipart,
+  numbers, booleans, and `null`. A key whose value is `undefined`, a `Date`,
+  and a `secrets.get()` handle are refused, where `JSON.stringify` would drop
+  or convert them.
+- `body` is sent as is, with `content-type: text/plain;charset=UTF-8` unless
+  `headers` sets one. Pass `json` or `body`, not both. Form, multipart,
   and binary bodies are not supported yet.
 - `timeout` is in milliseconds, at most 2147483647. `0` sets no timeout of
   its own, so only the running test's or hook's budget bounds the call.
@@ -118,7 +121,7 @@ URL goes where it names, on any target.
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
 | `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. Also a `Secret` in `json`. |
-| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `sec-fetch-mode`, which `fetch` sets itself, a header or body `fetch` refuses to send (a malformed `connection`, `expect`, `keep-alive`, `transfer-encoding`, `upgrade`, or a `content-length` that does not match the body), `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `host` or `sec-fetch-mode`, which `fetch` drops or sets itself, a header or body `fetch` refuses to send (a malformed `connection`, `expect`, `keep-alive`, `transfer-encoding`, `upgrade`, or a `content-length` that does not match the body), `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
 
