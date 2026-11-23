@@ -778,6 +778,26 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     expect(drops).toEqual([{ source: { id: 'a' }, destination: { id: 'n2' } }]);
   });
 
+  it('keeps a drag end refused while it looks again for the test id: a second look-alike does not end the wait', async () => {
+    for (const end of ['source', 'destination'] as const) {
+      const drops: unknown[] = [];
+      const host = makeHost({ onAction: (name, detail) => void (name === 'drag' && drops.push(detail)) });
+      let captures = 0;
+      host.capture = async () => {
+        captures += 1;
+        const twins = [setUp('b', undefined, 'setup-secondary'), ...(captures < 2 ? [] : [setUp('c', undefined, 'setup-tertiary')])];
+        return screen([...twins, ...(captures < 3 ? [] : [setUp('a', undefined, 'setup-primary')]), email]);
+      };
+      const other = { role: 'textbox', name: 'Email' };
+      const drag: RecordedAction = end === 'source'
+        ? { name: 'drag', summary: 'drag', target: flagged, destination: other }
+        : { name: 'drag', summary: 'drag', target: other, destination: flagged };
+      const outcome = await replayTrace(host, trace([drag]));
+      expect(outcome, end).toMatchObject({ completed: true, executed: 1 });
+      expect(drops, end).toEqual([end === 'source' ? { source: { id: 'a' }, destination: { id: 'n2' } } : { source: { id: 'n2' }, destination: { id: 'a' } }]);
+    }
+  });
+
   it('still hands off at once when two twins of a target recorded by test id are on screen', async () => {
     const host = makeHost({ nodes: [setUp('b', undefined, 'setup-secondary'), setUp('c', undefined, 'setup-tertiary')] });
     const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up"', target: flagged }]));

@@ -482,9 +482,14 @@ async function relocatePair(
   look: Look,
 ): Promise<{ readonly kind: 'found'; readonly source: string; readonly destination: string } | { readonly kind: 'failed'; readonly failure: RelocationFailure }> {
   let last: RelocationFailure = 'target-not-found';
+  // Each end keeps its refusal on later looks, as `relocate` does.
+  const refused = new Set<TraceTargetDescriptor>();
   const failed = (descriptor: TraceTargetDescriptor, result: Extract<RelocationResult, { kind: 'failed' }>) => {
-    last = result.failure;
-    return retryable(result, descriptor) ? undefined : { kind: 'failed' as const, failure: result.failure };
+    if (result.failure === 'target-ambiguous' && result.twinLeft === true) refused.add(descriptor);
+    const kept = refused.has(descriptor);
+    const marked = kept && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
+    if (!kept || marked.failure === 'target-ambiguous') last = marked.failure;
+    return retryable(marked, descriptor) ? undefined : { kind: 'failed' as const, failure: marked.failure };
   };
   const settled = await pollSettled(host, (screen) => {
     const from = relocateDescriptor(source, screen.nodes);
