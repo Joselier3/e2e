@@ -526,8 +526,8 @@ export interface SwipeOptions {
  * A swipe along a path between two points: a touch swipe on a device, a
  * pointer drag on a document platform. The points are on the viewport for
  * `screen.swipe` and on the node for `locator.swipe`. On a node, pixels and
- * percentages are both measured from its top-left corner, the corner
- * `tap({ position })` uses.
+ * percentages are both measured from its top-left corner (the same corner
+ * as `tap({ position })`).
  */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
@@ -635,8 +635,9 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   scrollIntoView(options?: ActionOptions): Promise<void>;
   /**
    * Performs a swipe scoped to exactly one node: in a direction, or along a
-   * path between two of its points. On the web, a path swipe is a pointer
-   * drag, so pagers that ignore a direction swipe's wheel event still turn.
+   * path between two of its points. On the web, a direction swipe is a
+   * wheel event and a path swipe is a pointer drag. So there, pagers built on
+   * pointer events only move with a path swipe.
    */
   swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
   /** Reads normalized text once a match exists, without retrying for a particular value. */

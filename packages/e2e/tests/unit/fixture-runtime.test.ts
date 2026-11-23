@@ -1086,12 +1086,12 @@ describe('coordinate input', () => {
     expect(pointTimeouts[1]).toBeLessThanOrEqual(1_000);
   });
 
-  it('locator.swipe measures pixels and percentages from the node origin, the corner tap({ position }) uses', async () => {
+  it('locator.swipe measures pixels and percentages from the node origin, the same corner as tap({ position })', async () => {
     const bordered = pointer({ origin: { x: 102, y: 203 } });
     await runtime(bordered.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: 0, y: '0%' }, to: { x: '50%', y: 4 } });
     expect(bordered.performedAt).toEqual(['swipeTo @ 102,203 -> 126,207']);
 
-    // A frame clipped the node's left side: percentages still span the whole node from its real corner.
+    // The node's left side is clipped by a frame, but percentages still span the whole node from its real corner.
     const clipped = pointer({ origin: { x: 60, y: 200 } });
     await runtime(clipped.engine).fixtures.screen.getByLabel('Pad').swipe({ from: { x: 0, y: 0 }, to: { x: '50%', y: '100%' } });
     expect(clipped.performedAt).toEqual(['swipeTo @ 60,200 -> 105,219']);

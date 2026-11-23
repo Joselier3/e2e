@@ -480,7 +480,7 @@ await screen.swipe({ from: { x: '50%', y: '80%' }, to: { x: '50%', y: '20%' } })
 points: a touch swipe on a device, a pointer drag on a document platform.
 Use it to dismiss a sheet or drag a card between columns. To swipe inside
 one node, such as a row or a pager, use the locator's [`swipe`](#swipe)
-instead. Its points are relative to the node.
+instead, with points relative to the node.
 
 - `from` and `to` are `ScreenPoint`s, pixels or percentages, as
   [`tapAt`](#screen-tapat) takes.
@@ -979,8 +979,9 @@ await screen.getByRole('contentinfo').scrollIntoView();
 ```ts
 /**
  * Performs a swipe scoped to exactly one node: in a direction, or along a
- * path between two of its points. On the web, a path swipe is a pointer
- * drag, so pagers that ignore a direction swipe's wheel event still turn.
+ * path between two of its points. On the web, a direction swipe is a
+ * wheel event and a path swipe is a pointer drag. So there, pagers built on
+ * pointer events only move with a path swipe.
  */
 swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
 ```
@@ -995,28 +996,29 @@ await screen.getByRole('region', 'Photos').swipe({
 });
 ```
 
-It takes the two shapes of [`screen.swipe`](#screen-swipe), plus `timeout`,
-which `screen.swipe` refuses.
+Both shapes of [`screen.swipe`](#screen-swipe) are accepted, plus `timeout`
+(an error on `screen.swipe`).
 
 - `{ direction, momentum? }` is a scroll gesture on the node. On the web
-  it's sent as a wheel event, so a pager that only follows pointer drags
+  it's sent as a wheel event, so a pager built only on pointer events
   doesn't move.
 - `{ from, to, duration? }` is a swipe along a path between two points of
-  the node: a finger swipe on a device, a mouse drag on the web. The web
-  drag sends pointer and mouse events but no touch events. The node is
-  brought into view and its box is read the same way as for
+  the node: a finger swipe on a device, a mouse drag on the web. On the
+  web, pointer and mouse events are sent, but touch events aren't. The
+  node is brought into view and its box is read the same way as for
   [`tap({ position })`](#tap), with the same checks skipped.
-- Pixels and percentages are both measured from the node's top-left corner,
-  the corner `tap({ position })` uses (inside the border on the web). A
-  pixel coordinate can go past the node's box. A percentage, `'0%'` through
-  `'100%'`, is a share of the node's width (`x`) or height (`y`).
+
+A path's pixels and percentages are both measured from the node's top-left
+corner (the same corner as `tap({ position })`, inside the border on the
+web). A pixel coordinate can go past the node's box. A percentage, `'0%'`
+through `'100%'`, is a share of the node's width (`x`) or height (`y`).
 
 | Throws | When |
 | --- | --- |
-| `ACTION_FAILED` | The gesture is rejected, or the browser engine cannot bring a path swipe's node into view. |
+| `ACTION_FAILED` | The gesture is rejected, or a path swipe's node can't be scrolled into view on the web. |
 | `INVALID_ARGUMENT` | A mix of the two shapes, an out-of-range duration, or a coordinate off the plane or not a percentage from `'0%'` through `'100%'`. |
-| `LOCATOR_NOT_FOUND` | A path swipe's node resolves but never shows a visible box within the timeout. |
-| `UNSUPPORTED_CAPABILITY` | The engine does not list `swipe` in its actions (a direction) or `swipeTo` in its pointer actions (a path). |
+| `LOCATOR_NOT_FOUND` | A path swipe's node is found, but it isn't visible with a box before the timeout. |
+| `UNSUPPORTED_CAPABILITY` | `swipe` isn't in the engine's actions (a direction), or `swipeTo` isn't in its pointer actions (a path). |
 
 ### Locator reads
 
@@ -1438,8 +1440,8 @@ export interface SwipeOptions {
  * A swipe along a path between two points: a touch swipe on a device, a
  * pointer drag on a document platform. The points are on the viewport for
  * `screen.swipe` and on the node for `locator.swipe`. On a node, pixels and
- * percentages are both measured from its top-left corner, the corner
- * `tap({ position })` uses.
+ * percentages are both measured from its top-left corner (the same corner
+ * as `tap({ position })`).
  */
 export interface SwipePathOptions {
   /** Where the finger goes down. */

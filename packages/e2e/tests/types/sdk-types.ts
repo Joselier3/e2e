@@ -793,10 +793,10 @@ void screen.tapAt({ x: '50', y: 1 });
 void screen.getByRole('image').tap({ position: { x: '50%', y: 0 } });
 // @ts-expect-error the executor's point verbs aim at screenshot pixels, never percentages.
 void executorContext.actions.tapAt({ x: '50%', y: 0 });
-// A locator swipe takes a path on its node's box, in pixels or percentages.
+// A locator swipe can be a path on its node's box, in pixels or percentages.
 void screen.getByRole('list').swipe({ from: { x: '90%', y: '50%' }, to: { x: 10, y: '50%' }, duration: 300, timeout: 1_000 });
 void screen.getByRole('list').swipe({ direction: 'left', timeout: 1_000 });
-// @ts-expect-error a locator path swipe names both ends.
+// @ts-expect-error both ends of a locator path swipe are required.
 void screen.getByRole('list').swipe({ from: point });
 // @ts-expect-error a locator swipe is a direction or a path, never both.
 void screen.getByRole('list').swipe({ direction: 'left', from: point, to: point });

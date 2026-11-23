@@ -60,7 +60,7 @@ test('locator.swipe({ from, to }) takes points on the node box, in pixels or per
   await expect(screen.getByLabel('Pad state')).toHaveText('swiped from 10,20 to 240,20');
 });
 
-test('locator.swipe({ from, to }) turns a pager that only follows pointer drags', async ({ app, screen }) => {
+test('locator.swipe({ from, to }) turns a pager that only moves on pointer drags', async ({ app, screen }) => {
   await app.open('/pointer');
   const pager = screen.getByRole('region', 'Photo pager');
 

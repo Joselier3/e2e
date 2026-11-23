@@ -384,9 +384,10 @@ test.describe('control inventory', () => {
   });
 
   // Percentages of the pad work on both platforms, whatever the screen
-  // density. The path runs right to left, since a left-to-right fling pops
-  // the screen. The pad reports points and Android bounds are physical
-  // pixels, so only the row (40 of the pad's 80 points) is checked exactly.
+  // density. The path runs right to left, since the screen is popped on a
+  // left-to-right fling. The pad's status is in points, but Android bounds
+  // are in physical pixels. So only the starting `y` (40 of the pad's 80
+  // points) is checked exactly.
   test('a locator swipe drags between points of the node', async ({ screen }) => {
     await showSection(screen, 'Gestures');
     const swipeStatus = screen.getByTestId('swipe-status');
