@@ -279,7 +279,7 @@ export function renderJunitReport(report: Report1Document, options?: JunitReport
  * root. Undefined when the artifacts are outside it, since GitLab cannot
  * serve those.
  */
-function attachmentBase(run: FinishedRun): string | undefined {
+export function attachmentBase(run: FinishedRun): string | undefined {
   const base = envValue(process.env, 'CI_PROJECT_DIR') ?? run.projectRoot;
   if (realpathOfExisting(base) === realpathOfExisting(run.artifactsRoot)) return '.';
   const relative = relativeToProjectRoot(base, run.artifactsRoot);

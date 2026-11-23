@@ -3,19 +3,38 @@
  * member's result carries no attempts of its own: its error, duration, and
  * steps live on the group's attempts, keyed by test id. Every other
  * result answers from its own attempts. The reporters that read a result
- * (JUnit, markdown) share this one reading.
+ * (JUnit, markdown, CTRF) share this one reading.
  */
 
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
 import type { FailureEvidence } from '@e2e-dev/core/lib/run/records';
+import { memberRan } from '@e2e-dev/core/lib/run/records';
 import type { AppLogRecord } from '@e2e-dev/core/lib/run/steps';
 import { isCutSerialRetry } from '../run/retry.ts';
 import type { ReportError, ReportResult, ReportSerialGroup, ReportStep } from './build.ts';
 
 type ReportArtifact = ReportResult['attempts'][number]['artifacts'][number];
+type ReportSerialAttempt = ReportSerialGroup['attempts'][number];
+type ReportSerialMember = ReportSerialAttempt['members'][number];
+
+/**
+ * An artifact a test owns: one its own records name, or, for a serial member,
+ * one the group attempt made that no member's records name, such as the
+ * group's video (`shared`).
+ */
+export interface OwnedArtifact {
+  readonly artifact: ReportArtifact;
+  readonly shared: boolean;
+}
 
 /** One attempt as a reporter reads it: what stopped it, the steps up to there, and what it left behind. */
 export interface AttemptView {
+  /** The attempt's id; for a serial member, its member record's. Absent when the test never ran here. */
+  readonly id: string | undefined;
+  /** When the attempt (for a serial member, its own part of it) started; absent when the test never ran here. */
+  readonly startedAt: string | undefined;
+  /** Whether the test itself ran in this attempt: false for a serial member the group attempt never reached. */
+  readonly ran: boolean;
   readonly status: ReportResult['attempts'][number]['status'] | 'skipped';
   /** How long the attempt ran; for a serial member, the member's own part of it. */
   readonly durationMs: number;
@@ -29,6 +48,14 @@ export interface AttemptView {
   readonly failure: FailureEvidence | undefined;
   /** The attempt's own artifacts; for a serial member, the group attempt's. */
   readonly artifacts: readonly ReportArtifact[];
+  /**
+   * The artifacts that belong to this test: all of a plain attempt's. A serial
+   * member gets the ones its own records name (a step's artifact ids, a step
+   * as producer, its failure's screenshot and screen), then the group
+   * attempt's that no member's records name, marked `shared`; never a
+   * sibling's.
+   */
+  readonly owned: readonly OwnedArtifact[];
   /** What else failed after the error: a teardown hook, the engine's cleanup. */
   readonly secondaryErrors: readonly ReportError[];
   /** What the engine said the attempt ran on; for a serial member, the group attempt's. */
@@ -53,7 +80,7 @@ export interface Outcome {
 }
 
 /** What a result that never ran an attempt reads as. */
-const NO_ATTEMPT: AttemptView = { status: 'skipped', durationMs: 0, cut: false, error: undefined, steps: [], appLog: [], failure: undefined, artifacts: [], secondaryErrors: [], skip: undefined };
+const NO_ATTEMPT: AttemptView = { id: undefined, startedAt: undefined, ran: false, owned: [], status: 'skipped', durationMs: 0, cut: false, error: undefined, steps: [], appLog: [], failure: undefined, artifacts: [], secondaryErrors: [], skip: undefined };
 
 export function outcome(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>): Outcome {
   const views = attemptViews(result, groups);
@@ -74,6 +101,10 @@ export function outcome(result: ReportResult, groups: ReadonlyMap<string, Report
 function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>): AttemptView[] {
   if (result.serialGroupId === undefined) {
     return result.attempts.map((attempt) => ({
+      id: attempt.id,
+      startedAt: attempt.startedAt,
+      ran: true,
+      owned: attempt.artifacts.map((artifact) => ({ artifact, shared: false })),
       status: attempt.status,
       durationMs: attempt.durationMs,
       cut: false,
@@ -91,6 +122,10 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
   return attempts.map((attempt, index) => {
     const member = attempt.members.find((candidate) => candidate.testId === result.testId);
     return {
+      id: member?.id,
+      startedAt: member?.startedAt,
+      ran: member !== undefined && memberRan(member),
+      owned: member === undefined ? [] : memberArtifacts(attempt, member),
       status: member?.status ?? attempt.status,
       durationMs: member?.durationMs ?? 0,
       // Older reports lack `cutRetry`; infer it from the attempt's status.
@@ -106,6 +141,32 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       skip: member?.skip,
     };
   });
+}
+
+/** The artifact ids a member's own records name: its steps' artifacts, its steps as producers, its failure's evidence. */
+function namedBy(member: ReportSerialMember, artifacts: readonly ReportArtifact[]): Set<string> {
+  const steps = new Set(member.steps.map((step) => step.id));
+  const named = new Set(member.steps.flatMap((step) => step.artifacts));
+  for (const id of [member.failure?.screenshot, member.failure?.screen]) if (id !== undefined) named.add(id);
+  for (const artifact of artifacts) {
+    if (artifact.producer.kind === 'step' && steps.has(artifact.producer.stepId)) named.add(artifact.id);
+  }
+  return named;
+}
+
+/**
+ * A member's own artifacts in a group attempt, then the ones no member's
+ * records name. A sibling's failure screenshot is never a member's.
+ */
+function memberArtifacts(attempt: ReportSerialAttempt, member: ReportSerialMember): OwnedArtifact[] {
+  const own = namedBy(member, attempt.artifacts);
+  const anyMember = new Set(attempt.members.flatMap((candidate) => [...namedBy(candidate, attempt.artifacts)]));
+  const owned: OwnedArtifact[] = [];
+  for (const artifact of attempt.artifacts) {
+    if (own.has(artifact.id)) owned.push({ artifact, shared: false });
+    else if (!anyMember.has(artifact.id) && memberRan(member)) owned.push({ artifact, shared: true });
+  }
+  return owned;
 }
 
 /** Whether an attempt ended the way the result did; a failure and a timeout are one verdict. */
