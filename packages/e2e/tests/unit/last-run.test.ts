@@ -72,10 +72,11 @@ describe('readWithReruns', () => {
   const lastRun = document([{ id: 'a', status: 'failed' }], [], { id: 'run-2' });
 
   it('reads the whole run only when it is a report of the same run as report.json', async () => {
-    const same = reportFile(report([{ id: 'a', status: 'failed' }, { id: 'b', status: 'passed' }], [], { id: 'run-2' }));
+    const foldable = { id: 'run-2', project: { id: 'p' }, startedAt: '2026-11-23T00:00:00.000Z', durationMs: 1, usage: Object.fromEntries(['maxAgentContextBytes', 'maxLedgerBytes', 'maxObservationBytes', 'artifactBytes', 'downloads', 'events', 'modelTokens', 'maxModelCallsInStep', 'maxActionStepsInStep'].map((field) => [field, 0])) };
+    const same = reportFile(report([{ id: 'a', status: 'failed', repeat: 0 }, { id: 'b', status: 'passed', repeat: 0 }], [], foldable));
     expect((await readWithReruns(same, lastRun))?.run.results.map((result) => result.testId)).toEqual(['a', 'b']);
     // A report.json downloaded from CI beside a file an earlier local rerun left.
-    expect(await readWithReruns(reportFile(report([{ id: 'b', status: 'passed' }], [], { id: 'run-1' })), lastRun)).toBeUndefined();
+    expect(await readWithReruns(reportFile(report([{ id: 'b', status: 'passed', repeat: 0 }], [], { ...foldable, id: 'run-1' })), lastRun)).toBeUndefined();
   });
 
   it('is no history when the file is missing, unreadable, or not a report', async () => {
@@ -83,6 +84,8 @@ describe('readWithReruns', () => {
     expect(await readWithReruns(missing, lastRun)).toBeUndefined();
     expect(await readWithReruns(reportFile('{ not json'), lastRun)).toBeUndefined();
     expect(await readWithReruns(reportFile(JSON.stringify({ schemaVersion: 'report-1', run: { id: 'run-2' } })), lastRun)).toBeUndefined();
+    // A report-1 file with the right id but without what the fold reads: a project, a start, usage.
+    expect(await readWithReruns(reportFile(report([{ id: 'a', status: 'failed', repeat: 0 }], [], { id: 'run-2' })), lastRun)).toBeUndefined();
   });
 });
 

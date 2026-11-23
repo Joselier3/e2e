@@ -105,10 +105,47 @@ export async function readLastRun(reportPath: string): Promise<Report1Document> 
 export async function readWithReruns(filePath: string, lastRun: Report1Document): Promise<Report1Document | undefined> {
   try {
     const document: unknown = JSON.parse(await readFile(filePath, 'utf8'));
-    return isReport(document) && document.run.id === lastRun.run.id ? document : undefined;
+    return isReport(document) && isFoldable(document) && document.run.id === lastRun.run.id ? document : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** The usage totals `foldLastRun` adds up, each a number in a report-1 document. */
+const USAGE_FIELDS = [
+  'maxAgentContextBytes',
+  'maxLedgerBytes',
+  'maxObservationBytes',
+  'artifactBytes',
+  'downloads',
+  'events',
+  'modelTokens',
+  'maxModelCallsInStep',
+  'maxActionStepsInStep',
+] as const;
+
+/**
+ * Whether a report holds what `foldLastRun` reads beyond what `isReport`
+ * checks: the run's project, start, and usage, and each result's test,
+ * target, agent, and repeat. A history file without them is no history,
+ * rather than a fold that throws part way.
+ */
+function isFoldable(document: Report1Document): boolean {
+  const run = document.run as Partial<Record<keyof Report1Document['run'], unknown>> & { project?: { id?: unknown }; usage?: Record<string, unknown> };
+  const results = [...document.run.results, ...(document.run.carried?.results ?? [])] as Partial<Record<keyof ReportResult, unknown>>[];
+  return (
+    typeof run.id === 'string' &&
+    typeof run.project?.id === 'string' &&
+    typeof run.startedAt === 'string' &&
+    (typeof run.durationMs === 'number' || typeof run.finishedAt === 'string') &&
+    typeof run.usage === 'object' &&
+    run.usage !== null &&
+    USAGE_FIELDS.every((field) => typeof run.usage?.[field] === 'number') &&
+    results.every(
+      (result) =>
+        typeof result.testId === 'string' && typeof result.targetId === 'string' && typeof result.agent === 'string' && typeof result.repeat === 'number',
+    )
+  );
 }
 
 /**

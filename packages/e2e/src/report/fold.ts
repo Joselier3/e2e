@@ -29,29 +29,73 @@ function testKey(result: ReportResult): string {
 }
 
 /**
- * The rerun's result with the run before's attempts in front of its own:
- * the same test's result there, and the further repeats the rerun has no
- * result of its own for. A pass after a failure there is flaky; an
- * interrupted rerun of a test that failed there keeps that failure.
+ * The rerun's result with the run before's attempts in front of its own,
+ * numbered again from 0: the same test's result there, and the further
+ * repeats the rerun has no result of its own for. A pass after a failure
+ * there, or after a run that was already flaky, is flaky; an interrupted
+ * rerun of a test that failed there keeps that failure.
  */
 function foldRerun(current: ReportResult, history: readonly ReportResult[]): ReportResult {
   if (history.length === 0) return current;
   const before = history.toSorted((a, b) => a.repeat - b.repeat);
-  const attempts = [...before.flatMap((result) => result.attempts), ...current.attempts];
+  const attempts = [...before.flatMap((result) => result.attempts), ...current.attempts].map((attempt, index) => ({ ...attempt, index }));
   const failure = before.findLast((result) => FAILED_STATUSES.has(result.status));
-  const status = failure === undefined ? current.status : current.status === 'passed' ? 'flaky' : current.status === 'interrupted' ? failure.status : current.status;
+  const wasFlaky = before.some((result) => result.status === 'flaky');
+  const status =
+    current.status === 'passed' && (failure !== undefined || wasFlaky)
+      ? 'flaky'
+      : current.status === 'interrupted' && failure !== undefined
+        ? failure.status
+        : current.status;
   return { ...current, status, attempts };
 }
 
 /**
- * A serial group the rerun ran again, with the run before's attempts in front
- * of its own: a member's history is read off its group, so the first pass's
- * failure stays visible under a member that passed on the rerun.
+ * A serial group the rerun ran again, with the attempts of the groups before
+ * it in front of its own: the same group in the run before, then the groups
+ * of further repeats its members fold in. A member's history is read off its
+ * group, so the first pass's failure stays visible under a member that
+ * passed on the rerun.
  */
-function foldGroup(current: ReportSerialGroup, before: ReportSerialGroup | undefined): ReportSerialGroup {
-  if (before === undefined) return current;
-  const attempts = [...before.attempts, ...current.attempts].map((attempt, index) => ({ ...attempt, index }));
+function foldGroup(current: ReportSerialGroup, before: readonly ReportSerialGroup[]): ReportSerialGroup {
+  if (before.length === 0) return current;
+  const attempts = [...before.flatMap((group) => group.attempts), ...current.attempts].map((attempt, index) => ({ ...attempt, index }));
   return { ...current, attempts };
+}
+
+/**
+ * The usage of two runs as one: their totals added, their per-step maxima
+ * the larger of the two, and the results counted again.
+ */
+function addUsage(a: ReportRun['usage'], b: ReportRun['usage'], discoveredResults: number): ReportRun['usage'] {
+  const optional = (x: number | undefined, y: number | undefined): number | undefined => (x === undefined && y === undefined ? undefined : (x ?? 0) + (y ?? 0));
+  const cachedTokens = optional(a.modelCachedTokens, b.modelCachedTokens);
+  const cost = optional(a.estimatedCostUsd, b.estimatedCostUsd);
+  return {
+    discoveredResults,
+    maxAgentContextBytes: Math.max(a.maxAgentContextBytes, b.maxAgentContextBytes),
+    maxLedgerBytes: Math.max(a.maxLedgerBytes, b.maxLedgerBytes),
+    maxObservationBytes: Math.max(a.maxObservationBytes, b.maxObservationBytes),
+    artifactBytes: a.artifactBytes + b.artifactBytes,
+    downloads: a.downloads + b.downloads,
+    events: a.events + b.events,
+    modelTokens: a.modelTokens + b.modelTokens,
+    maxModelCallsInStep: Math.max(a.maxModelCallsInStep, b.maxModelCallsInStep),
+    maxActionStepsInStep: Math.max(a.maxActionStepsInStep, b.maxActionStepsInStep),
+    ...(cachedTokens === undefined ? {} : { modelCachedTokens: cachedTokens }),
+    ...(cost === undefined ? {} : { estimatedCostUsd: cost }),
+  };
+}
+
+/**
+ * Rows by id, a carried row standing for a test the run left out, except
+ * where the run's own row already holds a result: a folded report's row then
+ * has every attempt, and its carried row only the last run's.
+ */
+function rowsById<T extends { readonly id: string; readonly selected?: boolean }>(own: readonly T[], carried: readonly T[]): Map<string, T> {
+  const rows = new Map(carried.map((row) => [row.id, row]));
+  for (const row of own) if (row.selected !== false || !rows.has(row.id)) rows.set(row.id, row);
+  return rows;
 }
 
 /** Reads the duration of a pass. Wall time is used for older reports. */
@@ -74,11 +118,13 @@ function runDuration(run: ReportRun): number {
  * suite hook failure whose scope it did not run again (`run.carried`). Then
  * the fold fails, since the suite is not known to pass. A carried test the
  * first pass interrupted reached no verdict: it leaves the outcome alone, and
- * the fold does not read as a pass. The first run's start time is kept.
- * Its duration is the sum of both runs'. The rerun takes the run before's filter
- * records and the change they judged, since the rows those filters left out
- * are the run before's too. An `e2e explore` run before leaves the rerun as
- * it is.
+ * the fold does not read as a pass. The first run's start time and shard are
+ * kept; the duration and usage are both runs' added up. The rerun takes the
+ * run before's filter records and the change they judged, since the rows
+ * those filters left out are the run before's too. `lastRun` may itself be a
+ * fold, which is how the runner chains reruns: its rows then hold every
+ * attempt so far, and they win over the rows the rerun carries. An
+ * `e2e explore` run before leaves the rerun as it is.
  */
 export function foldLastRun(current: Report, lastRun: Report): Report {
   // An exploration that wrote to the same output is not a pass of the suite.
@@ -87,8 +133,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   const carriedById = new Map((carried?.results ?? []).map((result) => [result.id, result]));
   const currentIds = new Set(current.run.results.map((result) => result.id));
   // The run before's own carried rows stand for the tests it left out, over their filtered rows.
-  const before = [...lastRun.run.results, ...(lastRun.run.carried?.results ?? [])];
-  const beforeById = new Map(before.map((result) => [result.id, result]));
+  const beforeById = rowsById(lastRun.run.results, lastRun.run.carried?.results ?? []);
   const leftovers = new Map<string, ReportResult[]>();
   for (const result of beforeById.values()) {
     if (currentIds.has(result.id)) continue;
@@ -101,26 +146,41 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   }
 
   const results: ReportResult[] = [];
+  // The groups of further repeats a serial member folds in, by the group its rerun result names.
+  const absorbed = new Map<string, Set<string>>();
   for (const result of current.run.results) {
     const previous = beforeById.get(result.id);
     if (!result.selected) {
-      results.push(carriedById.get(result.id) ?? previous ?? result);
+      // A row the run before holds a result for has every attempt so far; a carried one only the last run's.
+      const held = previous !== undefined && previous.selected !== false ? previous : undefined;
+      results.push(held ?? carriedById.get(result.id) ?? previous ?? result);
       continue;
     }
     const key = testKey(result);
     const extra = firstOfKey.get(key) === result.id ? (leftovers.get(key) ?? []) : [];
     if (extra.length > 0) leftovers.delete(key);
+    if (result.serialGroupId !== undefined) {
+      const groups = absorbed.get(result.serialGroupId) ?? new Set<string>();
+      for (const repeat of extra) if (repeat.serialGroupId !== undefined && repeat.serialGroupId !== result.serialGroupId) groups.add(repeat.serialGroupId);
+      if (groups.size > 0) absorbed.set(result.serialGroupId, groups);
+    }
     results.push(foldRerun(result, previous === undefined ? extra : [previous, ...extra]));
   }
   for (const extra of leftovers.values()) results.push(...extra);
 
-  const beforeGroups = new Map([...lastRun.run.serialGroups, ...(lastRun.run.carried?.serialGroups ?? [])].map((group) => [group.id, group]));
+  const beforeGroups = rowsById(lastRun.run.serialGroups, lastRun.run.carried?.serialGroups ?? []);
   const currentGroupIds = new Set(current.run.serialGroups.map((group) => group.id));
+  const absorbedIds = new Set([...absorbed.values()].flatMap((ids) => [...ids]));
   const carriedGroups = (carried?.serialGroups ?? []).filter((group) => !currentGroupIds.has(group.id) && !beforeGroups.has(group.id));
   const serialGroups = [
-    ...[...beforeGroups.values()].filter((group) => !currentGroupIds.has(group.id)),
+    ...[...beforeGroups.values()].filter((group) => !currentGroupIds.has(group.id) && !absorbedIds.has(group.id)),
     ...carriedGroups,
-    ...current.run.serialGroups.map((group) => foldGroup(group, beforeGroups.get(group.id))),
+    ...current.run.serialGroups.map((group) =>
+      foldGroup(group, [
+        ...(beforeGroups.has(group.id) ? [beforeGroups.get(group.id)!] : []),
+        ...[...(absorbed.get(group.id) ?? [])].flatMap((id) => (beforeGroups.has(id) ? [beforeGroups.get(id)!] : [])).toSorted((a, b) => a.repeat - b.repeat),
+      ]),
+    ),
   ];
 
   const carriedErrors = carried?.errors ?? [];
@@ -140,8 +200,11 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       results,
       errors: [...current.run.errors, ...carriedErrors],
       summary: summarizeResults(results, serialGroups),
+      usage: addUsage(lastRun.run.usage, current.run.usage, results.length),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
+      // The run that chose the tests decides the shard, so a plain rerun of a shard keeps it.
+      ...(lastRun.run.shard === undefined ? {} : { shard: lastRun.run.shard }),
     },
   };
 }

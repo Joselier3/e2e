@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeEngine, FAKE_APP, FAKE_APP_URL } from '../helpers/fake-engine.ts';
 import { engineConfig } from '../helpers/fixture-config.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
-import { createProject, resultByTitle, runExisting, runProject, type RunOutcome } from '../helpers/run-project.ts';
+import { createProject, resultByTitle, runExisting, runProject, type RunOptions, type RunOutcome } from '../helpers/run-project.ts';
 import type { FinishedRun, StoredArtifact, StoredArtifactLink } from '../../src/index.ts';
 
 const PASSING_TEST = `import { test } from 'e2e';
@@ -225,6 +225,55 @@ test('checkout', async ({ app }) => {
       }
     },
     90_000,
+  );
+
+  it(
+    'keeps every attempt of a test one rerun left out, the shard, and the usage of every run',
+    async () => {
+      /** A test that fails until it has run `passesOn` times before. */
+      const flaky = (title: string, passesOn: number) => `import { readFileSync, writeFileSync } from 'node:fs';
+import { test } from 'e2e';
+
+const counter = new URL('../${title}.count', import.meta.url);
+test('${title}', async ({ app }) => {
+  await app.open('/');
+  let runs = 0;
+  try { runs = Number(readFileSync(counter, 'utf8')); } catch {}
+  writeFileSync(counter, String(runs + 1));
+  if (runs < ${passesOn}) throw new Error('not yet ' + runs);
+});
+`;
+      const project = createProject({ 'tests/coupon.e2e.ts': flaky('coupon', 2), 'tests/delivery.e2e.ts': flaky('delivery', 3) });
+      try {
+        const config = engineConfig(createFakeEngine({ artifacts: true }).engine);
+        const output = path.join(project.dir, '.e2e');
+        const run = (runOptions: Partial<RunOptions>) => runExisting(project, { appUrl: FAKE_APP_URL, config, runOptions });
+        const first = await run({ shard: { index: 1, total: 1 } });
+        const couponShots = resultByTitle(first, 'coupon').attempts.flatMap((attempt) => attempt.artifacts.flatMap((artifact) => (artifact.path === undefined ? [] : [artifact.path])));
+        expect(couponShots.length).toBeGreaterThan(0);
+        const second = await run({ lastFailed: true });
+        // This rerun leaves coupon out, so it carries coupon's last result alone.
+        const third = await run({ lastFailed: true, grep: [/delivery/] });
+        expect(third.report.run.carried?.results.map((result) => result.titlePath.at(-1))).toEqual(['coupon']);
+        const last = await run({ lastFailed: true });
+        expect(last.status).toBe('passed');
+
+        const whole = JSON.parse(readFileSync(path.join(output, 'report-with-reruns.json'), 'utf8')) as RunOutcome['report'];
+        assertValidReport(whole);
+        expect(whole.run.results.map((result) => [result.titlePath.at(-1), result.status, result.attempts.map((attempt) => attempt.index)])).toEqual([
+          ['coupon', 'flaky', [0, 1, 2]],
+          ['delivery', 'flaky', [0, 1, 2, 3]],
+        ]);
+        expect(whole.run.shard).toEqual({ index: 1, total: 1 });
+        const runs = [first, second, third, last].map((outcome) => outcome.report.run.usage);
+        expect(whole.run.usage.artifactBytes).toBe(runs.reduce((sum, usage) => sum + usage.artifactBytes, 0));
+        expect(whole.run.usage.events).toBe(runs.reduce((sum, usage) => sum + usage.events, 0));
+        for (const artifactPath of couponShots) expect(existsSync(path.join(output, 'results', artifactPath)), artifactPath).toBe(true);
+      } finally {
+        project.cleanup();
+      }
+    },
+    120_000,
   );
 
   it(

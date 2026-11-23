@@ -63,8 +63,8 @@ interface SkipDetail {
   readonly reason: string;
   readonly relatedId?: string;
   /**
-   * Set on an unselected test of a sharded run (`--shard`) that another
-   * shard runs or reports: the shard cut it, whatever the reason says.
+   * Set on an unselected test of a sharded run (`--shard`) that this run's
+   * cut gave another shard, which runs or reports it, whatever the reason says.
    */
   readonly otherShard?: true;
 }

@@ -800,8 +800,9 @@ function shardItem(pair: TestTargetPair): string {
  * and each shard brings only the setups it needs. A skipped test is not an
  * item: the shard holding the item before it in report order reports it, the
  * first shard when none comes before, so the shards together report it once.
- * Every row the cut takes from this shard carries `otherShard`, so a reader
- * knows another shard owns it without parsing the reason.
+ * Every row the cut gives another shard carries `otherShard`, so a reader
+ * knows without parsing the reason. The cut is this run's: with
+ * `--last-failed`, it slices the tests the last run did not pass.
  */
 function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetPair[] {
   const items = shardItems(pairs);
@@ -814,7 +815,11 @@ function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetP
   return pairs.map((pair) => {
     if (pair.test.kind !== 'test') return pair;
     if (pair.disposition === 'filtered') return pair;
-    if (pair.disposition === 'skip') return previousKept || pair.skip === undefined ? pair : { ...pair, disposition: 'filtered' as const, skip: { ...pair.skip, otherShard: true as const } };
+    if (pair.disposition === 'skip') {
+      if (previousKept) return pair;
+      const skip = pair.skip === undefined ? { cause: 'filtered' as const, reason: FILTERED_REASON.shard } : pair.skip;
+      return { ...pair, disposition: 'filtered' as const, skip: { ...skip, otherShard: true as const } };
+    }
     previousKept = kept.has(shardItem(pair));
     if (previousKept) return pair;
     return { ...pair, disposition: 'filtered' as const, skip: { cause: 'filtered' as const, reason: FILTERED_REASON.shard, otherShard: true as const } };

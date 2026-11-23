@@ -390,4 +390,43 @@ describe('foldLastRun', () => {
     const other = report({ projectId: 'dev.example.other', status: 'failed', results: firstPass.run.results });
     expect(foldLastRun(rerun, other)).toBe(rerun);
   });
+
+  it('keeps a test flaky when it passes again after a run that was already flaky', () => {
+    const before = report({ results: [result({ title: 'wobbly', status: 'flaky', attempts: [failedAttempt, attempt()] })] });
+    const again = report({ results: [result({ title: 'wobbly', status: 'passed', attempts: [attempt()] })] });
+    const folded = byTitle(foldLastRun(again, before)).get('wobbly#0')!;
+    expect(folded.status).toBe('flaky');
+    expect(folded.attempts.map((entry) => [entry.status, entry.index])).toEqual([['failed', 0], ['passed', 1], ['passed', 2]]);
+  });
+
+  it('keeps every attempt of a test the run before holds a result for, over the last result the rerun carries for it', () => {
+    // A fold of two runs that both failed `owed`, then a rerun another filter kept it out of.
+    const history = report({ status: 'failed', results: [result({ title: 'owed', status: 'failed', attempts: [failedAttempt, failedAttempt] })] });
+    const carriedRow = result({ title: 'owed', status: 'failed', attempts: [failedAttempt] });
+    const leftOutRerun = report({
+      status: 'failed',
+      results: [result({ title: 'owed', status: 'skipped', selected: false, skip: { cause: 'filtered', reason: 'title does not match --grep' } })],
+      carried: { results: [carriedRow], serialGroups: [], errors: [] },
+    });
+    const folded = foldLastRun(leftOutRerun, history);
+    expect(byTitle(folded).get('owed#0')!.attempts).toHaveLength(2);
+    // And the next fold reads that row over the carried one too.
+    const passes = report({ results: [result({ title: 'owed', status: 'passed', attempts: [attempt()] })] });
+    expect(byTitle(foldLastRun(passes, folded)).get('owed#0')).toMatchObject({ status: 'flaky', attempts: [{}, {}, {}] });
+  });
+
+  it("folds the group of a serial member's further repeat into the group of the result a plain rerun ran", () => {
+    const member = (repeat: number, status: 'passed' | 'failed', group: string) =>
+      result({ title: ['wizard', 'step one'], status, serialGroupId: group, repeat });
+    const firstMember = member(0, 'passed', 'g0');
+    const before = report({
+      status: 'failed',
+      results: [firstMember, member(1, 'failed', 'g1')],
+      serialGroups: [serialGroup('g0', firstMember.testId, 'passed'), { ...serialGroup('g1', firstMember.testId, 'failed'), repeat: 1 }],
+    });
+    const again = report({ results: [member(0, 'passed', 'g0')], serialGroups: [serialGroup('g0', firstMember.testId, 'passed')] });
+    const folded = foldLastRun(again, before);
+    expect(folded.run.serialGroups.map((group) => [group.id, group.attempts.map((entry) => entry.status)])).toEqual([['g0', ['passed', 'failed', 'passed']]]);
+    expect(folded.run.results.map((entry) => [entry.repeat, entry.status, entry.serialGroupId])).toEqual([[0, 'flaky', 'g0']]);
+  });
 });

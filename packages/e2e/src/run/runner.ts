@@ -970,7 +970,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
                 );
           const inputs = await selectionInputs(options, config);
           lastRun = inputs.lastRun;
-          lastRuns = inputs.lastRuns;
+          lastRuns = lastRun === undefined ? undefined : ((await readWithReruns(outputLayout(config.output).withReruns, lastRun)) ?? lastRun);
           rerunCollection = {
             testIds: new Set(collection.tests.map((test) => test.id)),
             uncollectedFiles: new Set(collection.uncollected.map((skipped) => skipped.file)),
@@ -1392,8 +1392,6 @@ function workerEnvFor(plans: readonly TargetWorkPlan[], env: NodeJS.ProcessEnv):
 interface SelectionInputs {
   readonly filters: SelectionFilters;
   readonly lastRun: Report1Document | undefined;
-  /** The runs before this one folded into one, what `lastRuns` in `run` holds; undefined without `--last-failed`. */
-  readonly lastRuns: Report1Document | undefined;
 }
 
 /**
@@ -1474,8 +1472,7 @@ async function selectionInputs(options: SelectionRunOptions, config: ResolvedRun
     ...(options.grepInvert !== undefined ? { grepInvert: options.grepInvert } : {}),
     ...(options.targetIds !== undefined ? { targetIds: options.targetIds } : {}),
   };
-  const lastRuns = lastRun === undefined ? undefined : ((await readWithReruns(outputLayout(config.output).withReruns, lastRun)) ?? lastRun);
-  return { filters, lastRun, lastRuns };
+  return { filters, lastRun };
 }
 
 /**
