@@ -2,11 +2,9 @@
 
 import path from 'node:path';
 import { detectWorkspacePackageManager, execCommand } from '../internal/package-manager.ts';
-import { declaringPackage, installedPackage } from '../internal/project-package.ts';
+import { declaringPackage, installedPackage, RUNNER } from '../internal/project-package.ts';
 import { parseVersion, specAccepts } from '../internal/semver.ts';
 import { MISSING_SKILL_MESSAGE, packagedSkillDirectory, readGuide, skillTopics } from './skill.ts';
-
-const RUNNER = 'e2e';
 
 export interface GuideOptions {
   /** The version of the CLI that runs the command. */
@@ -28,31 +26,45 @@ interface GuideSource {
  * downloads the latest release when the project's own e2e is not installed
  * yet, and a global install is whatever it is, so the running CLI is not
  * always the version the tests will run on. An installed copy of another
- * version is read instead of this one; a declared version that is not
- * installed can only be named.
+ * version is read instead of this one, unless package.json has moved past
+ * it to a range this CLI is in; a declared version with no installed copy
+ * can only be named.
  */
 function guideSource({ version, cwd = process.cwd(), env = process.env }: GuideOptions): GuideSource {
   const declared = declaringPackage(cwd, RUNNER);
   const installed = installedPackage(path.resolve(cwd), RUNNER);
-  if (installed !== undefined) {
-    if (installed.version === version) return { from: undefined, notice: `Guide for e2e ${version}` };
-    const from = packagedSkillDirectory(installed.dir);
-    return from === undefined
-      ? { from, notice: `Guide for e2e ${version}; the project's installed e2e ${installed.version} ships no guide` }
-      : { from, notice: `Guide for e2e ${installed.version}, the version installed in this project (this CLI is e2e ${version})` };
-  }
-  const running = parseVersion(version);
-  if (declared === undefined || running === undefined || specAccepts(declared.spec, running) !== false) {
-    return { from: undefined, notice: `Guide for e2e ${version}` };
+  const accepts = (candidate: string): boolean | undefined => {
+    const parsed = parseVersion(candidate);
+    return declared === undefined || parsed === undefined ? undefined : specAccepts(declared.spec, parsed);
+  };
+  const own = { from: undefined, notice: `Guide for e2e ${version}` };
+  if (declared === undefined) {
+    if (installed === undefined || installed.version === version) return own;
+    return installedGuide(installed, version, '');
   }
   const spec = declared.spec.trim();
   const manifest = path.relative(cwd, path.join(declared.dir, 'package.json'));
   const manager = detectWorkspacePackageManager(declared.dir, env).manager;
-  const pinned = parseVersion(spec) === undefined ? `"e2e@${spec}"` : `e2e@${spec}`;
-  return {
-    from: undefined,
-    notice: `Guide for e2e ${version}, but ${manifest} declares e2e ${spec}, which is not installed. For the matching guide, run \`${manager} install\` and then \`${execCommand(manager, 'e2e guide')}\`, or run \`npx ${pinned} guide\`.`,
-  };
+  if (installed === undefined) {
+    if (accepts(version) !== false) return own;
+    const pinned = parseVersion(spec) === undefined ? `"e2e@${spec}"` : `e2e@${spec}`;
+    return {
+      from: undefined,
+      notice: `${own.notice}, but ${manifest} declares e2e ${spec} and no installed copy was found. For the matching guide, run \`${manager} install\` and then \`${execCommand(manager, 'e2e guide')}\`, or run \`npx ${pinned} guide\`.`,
+    };
+  }
+  const stale = accepts(installed.version) === false;
+  const reinstall = `${manifest} declares e2e ${spec}, which the installed e2e ${installed.version} is outside of; run \`${manager} install\``;
+  if (installed.version === version) return stale ? { from: undefined, notice: `${own.notice}, but ${reinstall} for the matching guide` } : own;
+  if (stale && accepts(version) === true) return { from: undefined, notice: `${own.notice}. ${reinstall}` };
+  return installedGuide(installed, version, stale ? `. ${reinstall} for the matching guide` : '');
+}
+
+function installedGuide(installed: { dir: string; version: string }, version: string, suffix: string): GuideSource {
+  const from = packagedSkillDirectory(installed.dir);
+  return from === undefined
+    ? { from, notice: `Guide for e2e ${version}; the project's installed e2e ${installed.version} ships no guide${suffix}` }
+    : { from, notice: `Guide for e2e ${installed.version}, the version installed in this project (this CLI is e2e ${version})${suffix}` };
 }
 
 /**
@@ -64,11 +76,8 @@ export function guide(topic: string | undefined, options: GuideOptions): number 
   const text = readGuide(topic, from);
   if (text === undefined) {
     const topics = skillTopics(from);
-    process.stderr.write(
-      topics.length === 0
-        ? `${MISSING_SKILL_MESSAGE}\n`
-        : `unknown topic "${topic}"; topics: ${topics.join(', ')}\n`,
-    );
+    // The topics are the read copy's, so the line that names its version comes first.
+    process.stderr.write(topics.length === 0 ? `${MISSING_SKILL_MESSAGE}\n` : `${notice}\nunknown topic "${topic}"; topics: ${topics.join(', ')}\n`);
     return 2;
   }
   process.stderr.write(`${notice}\n`);

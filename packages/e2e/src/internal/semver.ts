@@ -83,6 +83,8 @@ export function specAccepts(spec: string, version: Version): boolean | undefined
   const trimmed = spec.trim();
   const sugar = /^([~^])\s*(.+)$/u.exec(trimmed);
   if (sugar === null) {
+    // `satisfies` fills a partial version with zeros, which is npm's reading after `>=` and `<` only.
+    if (/(?:^|[\s|])(?:>|<=)\s*v?\d+(?:\.\d+)?(?:$|[\s|])/u.test(trimmed)) return undefined;
     return trimmed.split('||').every((set) => parseComparatorSet(set) !== undefined) ? satisfies(version, trimmed) : undefined;
   }
   const floor = parseVersion(sugar[2]!);

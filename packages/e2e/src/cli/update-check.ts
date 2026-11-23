@@ -16,7 +16,7 @@ import { writeFileAtomicSync } from '@e2e-dev/core/lib/internal/atomic-write';
 import { envFlag } from '@e2e-dev/core/lib/internal/env';
 import { detectWorkspacePackageManager, execCommand, readPackageManifest } from '../internal/package-manager.ts';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
-import { declaringPackage } from '../internal/project-package.ts';
+import { declaringPackage, RUNNER } from '../internal/project-package.ts';
 import { isRelease, latestRelease, olderThan } from '../internal/release.ts';
 import { telemetryConfigDir } from '../telemetry/store.ts';
 import { REPOSITORY_URL } from './docs-url.ts';
@@ -82,7 +82,7 @@ function upgradeCommand(cwd: string, env: NodeJS.ProcessEnv): string {
     if (readPackageManifest(dir) !== undefined) nearest = dir;
     if (path.dirname(dir) === dir) break;
   }
-  return execCommand(detectWorkspacePackageManager(declaringPackage(cwd, 'e2e')?.dir ?? nearest ?? cwd, env).manager, 'e2e upgrade');
+  return execCommand(detectWorkspacePackageManager(declaringPackage(cwd, RUNNER)?.dir ?? nearest ?? cwd, env).manager, 'e2e upgrade');
 }
 
 export class UpdateCheck {

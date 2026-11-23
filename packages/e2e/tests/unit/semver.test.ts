@@ -82,6 +82,9 @@ describe('specAccepts', () => {
     ['0.24.0', '*', undefined],
     ['0.24.0', '', undefined],
     ['0.24.0', '^0.23', undefined],
+    ['0.24.1', '<=0.24', undefined],
+    ['0.23.5', '>0.23', undefined],
+    ['0.23.5', '>=0.23 <1', true],
     ['0.24.0', 'workspace:*', undefined],
     ['0.24.0', 'npm:e2e@0.23.0', undefined],
   ] as const)('%s under %s is %s', (text, spec, expected) => {

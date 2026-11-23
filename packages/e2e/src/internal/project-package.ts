@@ -5,8 +5,11 @@ import path from 'node:path';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
 import { readPackageManifest } from './package-manager.ts';
 
-/** The package.json sections an install reads a dependency from. */
-const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const;
+/** The runner's package name. */
+export const RUNNER = 'e2e';
+
+/** The sections a package manager installs from, in the order a package is looked up. */
+export const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const;
 
 /** The spec `manifest` declares for `name`, from the first section that lists it, or undefined. */
 function declaredSpec(manifest: Record<string, unknown>, name: string): string | undefined {

@@ -60,7 +60,7 @@ describe('e2e guide and the version the project uses', () => {
     expect(run()).toBe(0);
     expect(stdout).toBe(readGuide(undefined));
     expect(stderr).toBe(
-      'Guide for e2e 0.24.0, but package.json declares e2e 0.23.0, which is not installed. For the matching guide, run `npm install` and then `npm exec -- e2e guide`, or run `npx e2e@0.23.0 guide`.\n',
+      'Guide for e2e 0.24.0, but package.json declares e2e 0.23.0 and no installed copy was found. For the matching guide, run `npm install` and then `npm exec -- e2e guide`, or run `npx e2e@0.23.0 guide`.\n',
     );
   });
 
@@ -69,7 +69,7 @@ describe('e2e guide and the version the project uses', () => {
     mkdirSync(path.join(dir, 'tests'));
     expect(run(undefined, path.join(dir, 'tests'))).toBe(0);
     expect(stderr).toBe(
-      `Guide for e2e 0.24.0, but ${path.join('..', 'package.json')} declares e2e ^0.23.0, which is not installed. For the matching guide, run \`pnpm install\` and then \`pnpm exec e2e guide\`, or run \`npx "e2e@^0.23.0" guide\`.\n`,
+      `Guide for e2e 0.24.0, but ${path.join('..', 'package.json')} declares e2e ^0.23.0 and no installed copy was found. For the matching guide, run \`pnpm install\` and then \`pnpm exec e2e guide\`, or run \`npx "e2e@^0.23.0" guide\`.\n`,
     );
   });
 
@@ -84,15 +84,31 @@ describe('e2e guide and the version the project uses', () => {
     expect(stdout).toBe('# topic of 0.23.1\n');
     stderr = '';
     expect(run('setup')).toBe(2);
-    expect(stderr).toBe('unknown topic "setup"; topics: only-here\n');
+    expect(stderr).toBe('Guide for e2e 0.23.1, the version installed in this project (this CLI is e2e 0.24.0)\nunknown topic "setup"; topics: only-here\n');
   });
 
-  it('keeps its own guide when the installed copy is the same version, whatever package.json declares', () => {
-    declare('0.23.0');
+  it('says when the installed copy is behind what package.json declares', () => {
+    declare('^0.25.0');
     install(RUNNING);
     expect(run()).toBe(0);
     expect(stdout).toBe(readGuide(undefined));
-    expect(stderr).toBe(`Guide for e2e ${RUNNING}\n`);
+    expect(stderr).toBe(
+      'Guide for e2e 0.24.0, but package.json declares e2e ^0.25.0, which the installed e2e 0.24.0 is outside of; run `npm install` for the matching guide\n',
+    );
+  });
+
+  it('keeps its own guide when package.json declares its version and the installed copy is a stale one', () => {
+    declare('^0.24.0');
+    install('0.20.0');
+    expect(run()).toBe(0);
+    expect(stdout).toBe(readGuide(undefined));
+    expect(stderr).toBe('Guide for e2e 0.24.0. package.json declares e2e ^0.24.0, which the installed e2e 0.20.0 is outside of; run `npm install`\n');
+  });
+
+  it("prints an installed copy's guide in a directory with no package.json", () => {
+    install('0.23.1');
+    expect(run()).toBe(0);
+    expect(stdout).toBe('# overview of 0.23.1\n');
   });
 
   it('says so when the installed version ships no guide', () => {
