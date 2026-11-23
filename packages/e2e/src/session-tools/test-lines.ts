@@ -300,9 +300,12 @@ export class SessionTestLines {
       }
       case 'press': {
         const key = stringField(input, 'key') ?? '';
-        if (target === undefined && isRemoteKey(key)) return { reason: `the key went to the remote; press it with the engine fixture's remote call, device.pressRemote(${JSON.stringify(key)}) on mobile` };
+        const repeated = typeof input['times'] === 'number' && input['times'] > 1;
+        if (target === undefined && isRemoteKey(key)) {
+          return { reason: `the key went to the remote; press it with the engine fixture's remote call, device.pressRemote(${JSON.stringify(key)}) on mobile${repeated ? ', once for each press' : ''}` };
+        }
         if (target === undefined) return { reason: 'the key went to whatever had focus; press it on a listed node by id for a line' };
-        if (typeof input['times'] === 'number' && input['times'] > 1) return { reason: 'a key pressed several times in one call has no one-line equivalent; press it once per call for lines' };
+        if (repeated) return { reason: 'a key pressed several times in one call has no one-line equivalent; press it once per call for lines' };
         return this.onTarget(target, (locator) => `${locator}.press(${JSON.stringify(key)})`);
       }
       case 'select':
