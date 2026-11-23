@@ -41,6 +41,12 @@ async function startApi(): Promise<Api> {
       response.end('ok');
       return;
     }
+    if (url.pathname === '/api/stall-body') {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.write('partial');
+      response.on('close', () => closed.push(url.searchParams.get('who') ?? 'stall'));
+      return;
+    }
     if (url.pathname === '/api/hang') {
       response.on('close', () => closed.push(url.searchParams.get('who') ?? 'hang'));
       return;
@@ -55,7 +61,8 @@ async function startApi(): Promise<Api> {
       return;
     }
     response.writeHead(404, 'Not Found');
-    response.end('nope');
+    // The method that arrived, so a test can tell it from the one its label names.
+    response.end(request.method);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
@@ -93,6 +100,7 @@ test('creates an order', async ({ request }) => {
   expect(Buffer.isBuffer(bytes) && bytes.toString('utf8')).toBe('ok');
   const missing = await request.fetch('/api/missing', { method: 'delete' });
   expect(missing.status).toBe(404);
+  expect(await missing.text()).toBe('DELETE');
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
@@ -115,6 +123,10 @@ test('hangs past the action timeout', async ({ request }) => {
   await request.get('/api/hang?who=action');
 });
 
+test('stalls in the body past its own timeout', async ({ request }) => {
+  await request.get('/api/stall-body?who=body', { timeout: 300 });
+});
+
 test('hangs past its own timeout', async ({ request }) => {
   await request.get('/api/hang?who=own', { timeout: 300 });
 });
@@ -134,11 +146,13 @@ test.describe('cleanup', () => {
     expect(action.error?.code).toBe('ACTION_FAILED');
     expect(action.error?.message).toContain('GET /api/hang exceeded its timeout of 1500ms');
     expect(resultByTitle(outcome, 'hangs past its own timeout').attempts[0]!.error?.message).toContain('GET /api/hang exceeded its timeout of 300ms');
+    // The headers arrived; the call still waits for the whole body under the same timeout.
+    expect(resultByTitle(outcome, 'stalls in the body past its own timeout').attempts[0]!.error?.message).toContain('GET /api/stall-body exceeded its timeout of 300ms');
     const deadline = resultByTitle(outcome, 'hangs past the test timeout').attempts[0]!;
     expect(deadline.error?.code).toBe('TEST_TIMEOUT');
     expect(log.lines()).toEqual(['afterEach:200']);
     // The connection is dropped, not left open past the test.
-    await vi.waitFor(() => expect(api.closed.toSorted()).toEqual(['action', 'deadline', 'own']));
+    await vi.waitFor(() => expect(api.closed.toSorted()).toEqual(['action', 'body', 'deadline', 'own']));
   });
 
   it('takes an absolute URL on a target with no engine, and names the missing app URL for a path', async () => {
@@ -209,7 +223,15 @@ test('an option request does not take', async ({ request }) => {
 });
 
 test('a header fetch sets itself', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: { 'Sec-Fetch-Mode': 'navigate' } });
+});
+
+test('a header fetch refuses', async ({ request }) => {
   await request.post('/api/refused-options', { body: 'a', headers: { 'Transfer-Encoding': 'chunked' } });
+});
+
+test('a malformed connection header', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: { connection: 'close,' } });
 });
 
 test('headers as a Headers object', async ({ request }) => {
@@ -270,7 +292,9 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
     expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
     expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
-    expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Transfer-Encoding" is set by fetch itself or not supported; leave it out' });
+    expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });
+    expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('POST /api/refused-options: fetch refused the request: invalid transfer-encoding header') });
+    expect(errorOf('a malformed connection header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('fetch refused the request: invalid connection header') });
     expect(api.paths).not.toContain('/api/refused-options');
     const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
     expect(refusal.error, JSON.stringify(refusal.error)).toBeUndefined();
@@ -318,6 +342,22 @@ test('leaks nothing', async ({ request }) => {
     expect(attempt.error?.code).toBe('ASSERTION_FAILED');
     expect(attempt.steps.map((step) => step.label)).toEqual(['GET /api/missing/<secret:TOKEN>']);
     expect(JSON.stringify(outcome.report)).not.toContain(secret);
+  });
+
+  it('cuts a step label to what the report admits, and sends the whole URL', async () => {
+    const file = `import { test, expect } from 'e2e';
+
+test('a long path', async ({ request }) => {
+  const response = await request.get('/files/' + 'x'.repeat(9000));
+  expect(response.status).toBe(404);
+});
+`;
+    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    assertValidReport(outcome.report);
+    const [step] = resultByTitle(outcome, 'a long path').attempts[0]!.steps;
+    expect(step!.label).toHaveLength(8192);
+    expect(step!.label.endsWith('…')).toBe(true);
+    expect(api.paths).toContain('/files/' + 'x'.repeat(9000));
   });
 
   it('is a name no engine may contribute', () => {

@@ -113,6 +113,12 @@ async function exchange(url: URL, init: RequestInit, label: string, signal: Abor
   } catch (cause) {
     // An abort is the budget's or the timeout's: the wrappers above report it.
     if (signal.aborted) throw cause;
+    const inner = cause instanceof Error && cause.cause instanceof Error ? cause.cause : undefined;
+    const code: unknown = inner === undefined ? undefined : Reflect.get(inner, 'code');
+    if (inner !== undefined && typeof code === 'string' && REFUSED_REQUEST_CODES.has(code)) {
+      // Undici checked a header or the body against the request and sent nothing.
+      throw new TestError('INVALID_ARGUMENT', `${label}: fetch refused the request: ${inner.message}`, { cause });
+    }
     throw new TestError('ACTION_FAILED', `${label} failed: ${networkReason(cause)}`, { cause });
   }
 }
@@ -139,8 +145,11 @@ function methodOf(options: APIRequestFetchOptions | undefined): string {
 /** The methods Node's fetch refuses to send. */
 const UNSENDABLE_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
 
-/** The headers Node's fetch refuses or sets itself, refused before the call so they never read as a network failure. */
-const UNSENDABLE_HEADERS = new Set(['content-length', 'expect', 'keep-alive', 'transfer-encoding', 'upgrade']);
+/** The header Node's fetch overwrites with its own value, so the test would not send what it names. */
+const OVERWRITTEN_HEADERS = new Set(['sec-fetch-mode']);
+
+/** Undici's codes for a request it refuses to send, as opposed to a network failure. */
+const REFUSED_REQUEST_CODES = new Set(['UND_ERR_INVALID_ARG', 'UND_ERR_NOT_SUPPORTED', 'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH']);
 
 /**
  * The URL a call goes to: a path resolved against the app URL as `app.open`
@@ -191,8 +200,8 @@ function requestInit(api: string, method: string, options: APIRequestOptions | u
   const headers = new Headers();
   for (const [name, value] of Object.entries(given ?? {})) {
     if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be a string`);
-    if (UNSENDABLE_HEADERS.has(name.toLowerCase())) {
-      throw new TestError('INVALID_ARGUMENT', `request: header "${name}" is set by fetch itself or not supported; leave it out`);
+    if (OVERWRITTEN_HEADERS.has(name.toLowerCase())) {
+      throw new TestError('INVALID_ARGUMENT', `request: header "${name}" is set by fetch itself; leave it out`);
     }
     try {
       validateHeaderName(name);

@@ -489,6 +489,9 @@ export interface AppLogRecord {
 /** Characters of an event's detail the report admits. */
 export const MAX_EVENT_DETAIL_CHARS = 300;
 
+/** Characters of a step label the report admits (report-v1's `maxLength`); a longer one is cut after redaction. */
+const MAX_STEP_LABEL_CHARS = 8192;
+
 /** Characters of a step label an error message quotes before clipping it. */
 const MAX_QUOTED_LABEL_CHARS = 80;
 
@@ -626,7 +629,7 @@ export class StepRecorder {
     registerProviderKeys(process.env);
     // The label is published, reported, and traced as is: a secret the test
     // spelled into an instruction or a locator stops here, once.
-    const label = this.redact?.(rawLabel) ?? rawLabel;
+    const label = bound(this.redact?.(rawLabel) ?? rawLabel, MAX_STEP_LABEL_CHARS);
     const parent = this.current();
     const stack = stepStack(this.projectRoot);
     // A step inside another (an `onAction` hook's) or inside an `expect.poll`
@@ -1100,7 +1103,7 @@ export class StepRecorder {
    * it verifies nothing.
    */
   guest(step: Pick<StepRecord, 'kind' | 'api' | 'label' | 'actor'> & { readonly source: SourceLocation | undefined }): GuestRecord {
-    const record = this.file({ ...step, label: this.redactText(step.label) });
+    const record = this.file({ ...step, label: bound(this.redactText(step.label), MAX_STEP_LABEL_CHARS) });
     this.publishStart(record);
     return {
       tell: (progress) => {
