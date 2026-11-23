@@ -786,7 +786,7 @@ export interface APIRequestFetchOptions extends APIRequestOptions {
  * `browser.waitForResponse`, and `route.fetch()` return.
  */
 export interface WebResponse {
-  /** Response URL, after redirects. */
+  /** Response URL. */
   readonly url: string;
   /** HTTP status. */
   readonly status: number;

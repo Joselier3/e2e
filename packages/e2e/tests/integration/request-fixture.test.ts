@@ -200,6 +200,18 @@ test('a refused connection', async ({ request }) => {
   await request.get('http://127.0.0.1:${closed}/api/ok');
 });
 
+test('a refused connection on localhost', async ({ request }) => {
+  await request.get('http://localhost:${closed}/api/ok');
+});
+
+test('an option request does not take', async ({ request }) => {
+  await request.post('/api/refused-options', { data: { sku: 'A1' }, params: { id: '17' } } as never);
+});
+
+test('headers as a Headers object', async ({ request }) => {
+  await request.get('/api/refused-options', { headers: new Headers({ authorization: 'Bearer t' }) as never });
+});
+
 test('a refusal is a rejected promise and a failed step', async ({ request }) => {
   const settled = await request.get('/api/ok', { body: 'raw' }).then(() => 'sent', (error: { code?: string }) => error.code);
   if (settled !== 'INVALID_ARGUMENT') throw new Error('settled as ' + settled);
@@ -248,8 +260,13 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a method with a space')?.code).toBe('INVALID_ARGUMENT');
     expect(errorOf('a refused connection')).toMatchObject({
       code: 'ACTION_FAILED',
-      message: expect.stringContaining(`GET http://127.0.0.1:${closed}/api/ok failed: connect ECONNREFUSED`),
+      message: expect.stringContaining(`GET http://127.0.0.1:${closed}/api/ok failed: fetch failed: connect ECONNREFUSED`),
     });
+    // localhost resolves to two addresses, so Node's refusal is an AggregateError with an empty message.
+    expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
+    expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
+    expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
+    expect(api.paths).not.toContain('/api/refused-options');
     const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
     expect(refusal.error, JSON.stringify(refusal.error)).toBeUndefined();
     expect(refusal.steps.map(({ api: name, label, status, error }) => ({ api: name, label, status, code: error?.code }))).toEqual([

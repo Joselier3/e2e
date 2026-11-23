@@ -1,8 +1,9 @@
 /** The `request` fixture: HTTP calls from a test, each one a step bounded by the test's budget. */
 
 import { validateHeaderName, validateHeaderValue } from 'node:http';
-import { ConfigurationError, errorMessage, TestError } from '../internal/errors.ts';
+import { ConfigurationError, errorMessage, messageWithCauses, TestError } from '../internal/errors.ts';
 import { validateJsonValue } from '../internal/json-value.ts';
+import { isPlainObject, rejectUnknownOptions } from '../internal/options.ts';
 import { MAX_TIMER_MS, stepTimeout, withAbort, withScopedBudget } from '../internal/time.ts';
 import type { NormalizedBaseUrl } from '../internal/urls.ts';
 import type { APIRequest, APIRequestFetchOptions, APIRequestOptions, WebResponse } from '../types.ts';
@@ -87,7 +88,7 @@ function prepare(
   }
   const label = `${method} ${shownUrl(url, base)}`;
   try {
-    const init = requestInit(method, options);
+    const init = requestInit(api, method, options);
     return { label, url, init, timeoutMs: requestTimeout(options?.timeout, api) };
   } catch (refused) {
     return { label, refused };
@@ -116,10 +117,9 @@ async function exchange(url: URL, init: RequestInit, label: string, signal: Abor
   }
 }
 
-/** Why fetch failed, from the cause undici puts under its generic `fetch failed`. */
+/** Why fetch failed: undici's `fetch failed` and its causes, an `AggregateError`'s per-address failures included. */
 function networkReason(cause: unknown): string {
-  const inner = cause instanceof Error && cause.cause !== undefined ? cause.cause : cause;
-  return errorMessage(inner);
+  return cause instanceof Error ? messageWithCauses(cause) : errorMessage(cause);
 }
 
 /** The method `request.fetch` sends: `options.method` upper-cased, GET when absent. */
@@ -175,13 +175,14 @@ function shownUrl(url: URL, base: NormalizedBaseUrl | undefined): string {
   return url.origin === base?.origin ? url.pathname : `${url.origin}${url.pathname}`;
 }
 
-/** The fetch init for one call: its method, headers, and body. */
-function requestInit(method: string, options: APIRequestOptions | undefined): RequestInit {
-  if (options !== undefined && (typeof options !== 'object' || options === null)) {
-    throw new TestError('INVALID_ARGUMENT', 'request: options must be an object');
-  }
+/** The options every method takes; `request.fetch` takes `method` too. */
+const OPTION_KEYS = ['headers', 'json', 'body', 'timeout'] as const;
+
+/** The fetch init for one call: its method, headers, and body. An option it does not know is refused, never dropped. */
+function requestInit(api: string, method: string, options: APIRequestOptions | undefined): RequestInit {
+  rejectUnknownOptions(api, options as object | undefined, api === 'request.fetch' ? [...OPTION_KEYS, 'method'] : OPTION_KEYS);
   const given: unknown = options?.headers;
-  if (given !== undefined && (typeof given !== 'object' || given === null || Array.isArray(given))) {
+  if (given !== undefined && !isPlainObject(given)) {
     throw new TestError('INVALID_ARGUMENT', 'request: headers must be an object of header names to string values');
   }
   const headers = new Headers();

@@ -345,7 +345,8 @@ The engine driving the surface: `web(...)`, `mobile(...)`, or any
 engine: web({ browser: 'firefox' }),
 ```
 
-A target without an engine runs through agent tools only. A target with `app`
+A target without an engine runs through agent tools and
+[`request`](/reference/request) calls to absolute URLs. A target with `app`
 and no engine is `INVALID_CONFIG`.
 
 ### The app under test

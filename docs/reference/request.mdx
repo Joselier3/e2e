@@ -118,7 +118,7 @@ URL goes where it names, on any target.
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
 | `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. Also a `Secret` in `json`. |
-| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type, a header name or value is invalid, `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is `CONNECT`, `TRACE`, or `TRACK`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
 
@@ -195,7 +195,7 @@ export interface APIRequestFetchOptions extends APIRequestOptions {
  * `browser.waitForResponse`, and `route.fetch()` return.
  */
 export interface WebResponse {
-  /** Response URL, after redirects. */
+  /** Response URL. */
   readonly url: string;
   /** HTTP status. */
   readonly status: number;
