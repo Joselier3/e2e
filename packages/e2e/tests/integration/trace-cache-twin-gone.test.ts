@@ -242,3 +242,52 @@ test('sets up both', async ({ app, agent, screen }) => {
     ]);
   }, 240_000);
 });
+
+describe('trace cache: one step presses a twin and a lone control from one look', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  /** Presses the first "Set up" button, then "Done", both from one look. */
+  const oneLook: StepExecutor = {
+    name: 'one-look',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Set up"/) });
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Done"/) });
+      return { status: 'passed' as const, summary: 'set up and done' };
+    },
+  };
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({
+      'tests/done.e2e.ts': `import { test, expect } from 'e2e';
+
+test('sets up and finishes', async ({ app, agent, screen }) => {
+  await app.open('/setup-twins?done=1');
+  await agent.act('set up the first integration and finish');
+  await expect(screen.getByRole('status')).toHaveText('Setup opened');
+});
+`,
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('marks no count for a control the description names alone', async () => {
+    const run = await runExisting(project, {
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', reporters: ['json'] as const, workers: 1, agents: { default: { executor: oneLook } }, cache: 'read-write' as const },
+    });
+    expect(run.exitCode).toBe(0);
+    const [entry] = readEntries(project);
+    expect(entry!.entry.payload.actions.map((action) => (action.name === 'tap' ? action.target : undefined))).toEqual([
+      { role: 'button', name: 'Set up', position: { index: 0, of: 2 } },
+      { role: 'button', name: 'Done' },
+    ]);
+  }, 240_000);
+});

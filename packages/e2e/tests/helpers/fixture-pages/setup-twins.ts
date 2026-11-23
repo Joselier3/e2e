@@ -8,15 +8,16 @@ import type { PageRenderer } from './page.ts';
  * the wrong one reaches the recorded end state. `?ids=1` gives each its own
  * test id. The `b` variant (`?variant=b`, or `FixtureApp.setVariant`) renders
  * only the second, as a screen does once the first integration is removed.
+ * `?done=1` adds a lone "Done" button, a control no twin shares.
  */
-function renderSetupTwins(withIds: boolean, variant: string | null): string {
+function renderSetupTwins(withIds: boolean, variant: string | null, done: boolean): string {
   const button = (key: string) => `<button${withIds ? ` data-testid="setup-${key}"` : ''} onclick="press()">Set up</button>`;
   const buttons = variant === 'b' ? [button('secondary')] : [button('primary'), button('secondary')];
   return `<!doctype html>
 <html>
 <head><title>Integrations</title></head>
 <body>
-  <div>${buttons.join(' ')}</div>
+  <div>${buttons.join(' ')}${done ? ' <button onclick="press()">Done</button>' : ''}</div>
   <output role="status" aria-label="Setup">Not started</output>
   <script>
     function press() {
@@ -50,6 +51,6 @@ const REMOVE_TWINS_PAGE = `<!doctype html>
 </html>`;
 
 export const SETUP_TWIN_PAGES: Record<string, PageRenderer> = {
-  '/setup-twins': (_state, url) => renderSetupTwins(url.searchParams.get('ids') === '1', url.searchParams.get('variant')),
+  '/setup-twins': (_state, url) => renderSetupTwins(url.searchParams.get('ids') === '1', url.searchParams.get('variant'), url.searchParams.get('done') === '1'),
   '/remove-twins': () => REMOVE_TWINS_PAGE,
 };
