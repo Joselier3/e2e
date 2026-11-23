@@ -7,20 +7,27 @@ A Next.js App Router greeting app with three locator tests and two agent tests.
 ## Start a new app from this example
 
 `create-next-app` copies this folder into a new directory and installs the
-dependencies:
+dependencies. Run the commands for your package manager.
+
+npm:
 
 ```bash
-# npm
 npx create-next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app
 cd my-app
 npm run test:e2e
+```
 
-# pnpm
+pnpm:
+
+```bash
 pnpm create next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app
 cd my-app
 pnpm test:e2e
+```
 
-# bun
+bun:
+
+```bash
 bun create next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app
 cd my-app
 bun run test:e2e
