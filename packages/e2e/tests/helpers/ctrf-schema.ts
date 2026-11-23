@@ -3,7 +3,8 @@
  * `tests/fixtures/ctrf/` (ctrf-io/ctrf at tag v0.3.0, MIT, license beside it),
  * plus the rules on `retries` and `retryAttempts` the spec states and the
  * schema cannot: `retries` equals the number of earlier attempts, which are
- * numbered from 1, and both are absent when there are none.
+ * numbered from 1. Stricter than the spec, which allows `retries: 0`: e2e
+ * leaves both fields out when there are none.
  */
 
 import assert from 'node:assert/strict';
@@ -35,7 +36,8 @@ export function assertValidCtrf(document: unknown): void {
   }
   for (const test of (document as { results: { tests: CtrfTestShape[] } }).results.tests) {
     const attempts = test.retryAttempts;
-    if ((test.retries ?? 0) === 0) {
+    if (test.retries === 0) assert.fail(`${test.name}: retries 0 is written; e2e leaves both retry fields out when there are none`);
+    if (test.retries === undefined) {
       if (attempts !== undefined) assert.fail(`${test.name}: retryAttempts without retries`);
       continue;
     }

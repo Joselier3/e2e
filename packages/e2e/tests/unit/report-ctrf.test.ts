@@ -186,8 +186,8 @@ describe('renderCtrfReport', () => {
           reportResult({
             status: 'failed',
             attempts: [
-              reportAttempt({ id: 'attempt-1', status: 'failed', error: reportError() }),
-              reportAttempt({ id: 'attempt-2', index: 1, status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED', message: 'SIGINT' }) }),
+              reportAttempt({ id: 'attempt-1', status: 'failed', error: reportError(), steps: [reportStep({ api: 'first.step' })], artifacts: [artifact('first', { url: 'https://store.example/first' })] }),
+              reportAttempt({ id: 'attempt-2', index: 1, status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED', message: 'SIGINT' }), steps: [reportStep({ api: 'cut.step' })], artifacts: [artifact('cut', { url: 'https://store.example/cut' })] }),
             ],
           }),
         ],
@@ -195,6 +195,9 @@ describe('renderCtrfReport', () => {
     );
     expect(test).toMatchObject({ attemptId: 'attempt-1', status: 'failed', extra: { [KEY]: { cutAttempts: 1 } } });
     expect(test).not.toHaveProperty('retryAttempts');
+    // Steps and attachments are the represented attempt's, not the cut one's.
+    expect(test!.steps.map((step: Json) => step.name)).toEqual(['first.step tap Sign in']);
+    expect(test!.attachments.map((file: Json) => file.name)).toEqual(['screenshot-first']);
   });
 
   it('marks a pass under test.fail with the expected failure it covered', () => {
@@ -320,6 +323,7 @@ describe('renderCtrfReport', () => {
         ],
       });
       const skipped = reportResult({ id: 'result-2', status: 'skipped', skip: { cause: 'filtered', reason: `reason ${S}`, filter: `filter-${S}` }, selected: false, attempts: [] });
+      const broken = reportResult({ id: 'result-4', testId: 'test-4', titlePath: ['broken'], status: 'failed', attempts: [reportAttempt({ status: 'failed', steps: [step], error: reportError({ code: `CODE_${S}`, message: `failed ${S}` }) })] });
       const stopped = reportResult({ id: 'result-3', status: 'interrupted', attempts: [reportAttempt({ status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED', message: `stopped ${S}` }) })] });
       const document = render(
         doc({
@@ -327,14 +331,21 @@ describe('renderCtrfReport', () => {
           vcs: { commit: 'a'.repeat(40), branch: `branch-${S}` },
           environment: { ci: false, trustNoticeShown: false, os: `os-${S} release-${S}`, arch: 'x64', runtime: 'node' },
           errors: [reportError({ code: `RUN_${S}`, message: `run ${S}`, phase: 'afterAll' })],
-          results: [failed, skipped, stopped],
+          results: [failed, skipped, stopped, broken],
         }),
         { artifactsDir: `out-${S}/results`, redact },
       );
       const text = JSON.stringify(document);
       expect(text).not.toContain(S);
       // Every planted text came through, as its marker: none was dropped to pass.
-      expect(text.split('<secret:probe>').length - 1).toBeGreaterThanOrEqual(30);
+      // One marker per planted text that reaches the file: a field that skipped the redaction changes the count.
+      expect(text.split('<secret:probe>').length - 1).toBe(40);
+      const brokenTest = (document.results.tests as Json[]).find((test) => test.testId === 'result-4')!;
+      expect(brokenTest).toMatchObject({
+        message: 'failed <secret:probe>',
+        trace: 'CODE_<secret:probe> on actor-<secret:probe>: failed <secret:probe>',
+        steps: [{ name: 'api.<secret:probe> label <secret:probe>', extra: { [KEY]: { actor: 'actor-<secret:probe>', code: 'CODE_<secret:probe>', explanation: 'why <secret:probe>' } } }],
+      });
       expect(document.results.tests[0].attachments ?? []).toEqual([]);
       // A link that holds the value is left out, hosted or local; a name that holds it is redacted.
       expect(document.results.tests[0].retryAttempts[0].attachments).toEqual([expect.objectContaining({ name: 'screenshot-shot-<secret:probe>', path: 'https://store.example/plain' })]);
@@ -462,6 +473,16 @@ describe('renderCtrfReport', () => {
       expect(pays!.retryAttempts.map((attempt: Json) => [attempt.attemptId, attempt.status])).toEqual([['test-2-member', 'failed']]);
     });
 
+    it('counts no cut retry for a member the cut retry never reached', () => {
+      const skip = { cause: 'serial-predecessor-failed' as const, reason: 'an earlier test in the serial group failed' };
+      const first = groupAttempt('group-attempt-1', [member('test-1'), member('test-2', { status: 'failed', error: reportError({ message: 'card declined' }) })], { status: 'failed' });
+      const cut = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2', status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED' }) }), member('test-2', { id: 'test-2-member-2', status: 'skipped', durationMs: 0, skip })], { index: 1, status: 'interrupted', cutRetry: true });
+      const serial = group([first, cut], 'failed');
+      const [, pays] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['failed', 'failed']) }));
+      expect(pays).toMatchObject({ status: 'failed', attemptId: 'test-2-member', message: 'card declined' });
+      expect(pays).not.toHaveProperty('extra');
+    });
+
     it('counts a member flaky when an earlier attempt of its own timed out', () => {
       const first = groupAttempt('group-attempt-1', [member('test-1', { status: 'timed-out', error: reportError({ code: 'TEST_TIMEOUT' }) }), member('test-2', { status: 'skipped', durationMs: 0, skip: { cause: 'serial-predecessor-failed', reason: 'earlier failed' } })], { status: 'timed-out' });
       const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2' }), member('test-2', { id: 'test-2-member-2' })], { index: 1 });
@@ -579,6 +600,18 @@ describe('ctrf', () => {
     const document = JSON.parse(files[0]!.content) as Json;
     assertValidCtrf(document);
     expect(document.results.tests[0].attachments[0].path).toBe('.e2e/results/checkout/shot-1.png');
+  });
+
+  it('passes the run redaction to the file it writes', async () => {
+    vi.stubEnv('CI_PROJECT_DIR', undefined);
+    const run: FinishedRun = {
+      ...finishedRun('report.json'),
+      report: doc({ results: [reportResult({ titlePath: ['auth', 'as Zr8Kq2'] })] }),
+      redact: (text) => text.replaceAll('Zr8Kq2', '<secret:probe>'),
+    };
+    const [file] = await ctrf().reportFiles!(run, new AbortController().signal);
+    expect(file!.content).not.toContain('Zr8Kq2');
+    expect(file!.content).toContain('auth > as <secret:probe> [web]');
   });
 
   it('writes to outputFile when given one, and nothing when the report itself was not written', async () => {

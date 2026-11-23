@@ -216,8 +216,8 @@ reporters: ['list', 'ctrf'],
 - In a [serial group](/reference/test#serial), a test runs again when the
   group retries, so it has `retries` even when it passed every time; a tool
   that reads `retries` as flakiness counts it as flaky, while `flaky` stays
-  unset. A test a retry skipped stands for no attempt, and the attempts it
-  ran are its `retryAttempts`.
+  unset. A test a retry skipped stands for that skipped attempt: no
+  timing or attachments, and the attempts it ran are its `retryAttempts`.
 - `status` is CTRF's `passed`, `failed`, `skipped`, or `other`. `rawStatus`
   keeps e2e's own: `timed-out` is `failed`, `interrupted` is `other`.
 - Run errors, such as a failed `afterAll`, go in `results.errors` and never
