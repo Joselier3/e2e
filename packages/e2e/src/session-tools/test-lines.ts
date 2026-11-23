@@ -200,7 +200,7 @@ export class SessionTestLines {
   tool(): ToolSet[string] {
     return {
       description:
-        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. Paste it into a test, then add any assertion it lacks. After open_session with test, the lines continue that test from where it stopped.",
+        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. It is a draft to split, not a test to paste. Write one test per behavior: its arrange lines, the act under test, then its checks together at the end. Every test needs a check of its outcome; add one where the draft has none. A check of a screen the flow later leaves belongs to its own test. Name a locator a test repeats. See topic writing-tests, Structure. After open_session with test, the lines continue that test from where it stopped.",
       inputSchema: z.object({}).strict(),
       execute: async () => this.draft(),
     };
@@ -218,14 +218,20 @@ export class SessionTestLines {
     // A session that ran a test holds only what came after it: the test's own lines are in its file.
     const [lead, place] =
       testRan === undefined
-        ? [`Draft test body from this session's actions, ${count}:`, `Paste it into a test body, async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... },`]
-        : [`Test lines from this session's actions after test ${testRan} stopped, ${count}:`, 'Put them in that test where it stopped, in place of the line that failed or after its last line,'];
+        ? [
+            `Draft test body from this session's actions, ${count}:`,
+            `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing. See topic writing-tests, Structure.`,
+          ]
+        : [
+            `Test lines from this session's actions after test ${testRan} stopped, ${count}:`,
+            "Put them in that test where it stopped, in place of the line that failed or after its last step. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
+          ];
     return [
       lead,
       '',
       ...body,
       '',
-      `${place} and add an expect after each step that should change the screen.${imports.length === 0 ? '' : ` Import ${imports.join(' and ')} from 'e2e'.`}`,
+      `${place}${imports.length === 0 ? '' : ` Import ${imports.join(' and ')} from 'e2e'.`}`,
     ].join('\n');
   }
 

@@ -17,43 +17,54 @@
 
 ```ts
 // tests/todos.e2e.ts
-import { beforeEach, describe, test } from '@e2e-dev/web';
+import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 
-describe('todos', { tags: ['todos'] }, () => {
-  beforeEach(async ({ app }) => {
+test.describe('todos', { tags: ['todos'] }, () => {
+  test.beforeEach(async ({ app }) => {
     await app.open('/todos');
   });
 
-  test('adds a todo to the list', async ({ agent, screen }) => {
-    await agent.act('add a todo named {title}', { params: { title: 'Write the release notes' } });
+  const labels = { add: 'Add', remaining: 'Remaining' };
+  const title = 'Write the release notes';
+  const other = 'Book the venue';
+  const addTodo = 'Add a todo named {title}';
+  const completeTodo = 'Mark {title} as done';
+  const verifyAddedTodo = 'There is one todo, {title}. It is unchecked and the list shows 1 remaining.';
 
-    await expect(screen.getByRole('listitem')).toHaveCount(1);
-    await expect(screen.getByRole('status', 'Remaining')).toHaveText('1 remaining');
+  test('adds a todo to the list', async ({ agent, screen }) => {
+    await agent.act(addTodo, { params: { title } });
+    await screen.getByRole('checkbox', title).waitFor();
+
+    await agent.assert(verifyAddedTodo, { params: { title } });
   });
 
-  test('marks a todo as done', async ({ agent, screen, browser }) => {
-    await agent.act('add a todo named {title}', { params: { title: 'Write the release notes' } });
-    await screen.getByRole('checkbox', 'Write the release notes').waitFor();
+  test('marks a todo as done', async ({ agent, screen }) => {
+    const todo = screen.getByRole('checkbox', title);
+    await agent.act(addTodo, { params: { title: other } });
+    await agent.act(addTodo, { params: { title } });
+    await todo.waitFor();
 
-    await agent.act('mark the todo as done');
+    await agent.act(completeTodo, { params: { title } }); // select the second todo
 
-    await expect(screen.getByRole('status', 'Remaining')).toHaveText('0 remaining');
-    await expect(browser).toHaveURL('/todos');
+    await expect(todo).toBeChecked();
+    await expect(screen.getByRole('checkbox', other)).not.toBeChecked();
+    await expect(screen.getByRole('status', labels.remaining)).toHaveText('1 remaining');
   });
 
   test('ignores an empty submission', async ({ screen }) => {
     // An exact interaction: the empty submit is the point of the test.
-    await screen.getByRole('button', 'Add').tap();
+    await screen.getByRole('button', labels.add).tap();
 
-    await expect(screen.getByRole('listitem')).toHaveCount(0);
+    await expect(screen.getByRole('list', 'Todos').getByRole('listitem')).toHaveCount(0);
   });
 });
 ```
 
-The agent does the flow; `expect` pins what must be true at the end, and
-that check lets the replay cache rerun every goal before it later. `screen`
-actions are for exact interactions and values. Files match the config
+The agent drives the flow. A passing `agent.assert` or locator matcher
+checks the outcome and confirms the preceding actions for replay. `screen`
+actions are for exact interactions and short, stable flows; a goal takes
+its values in `params`. Files match the config
 `tests` glob, default `tests/**/*.e2e.ts`. In a browser every test starts
 from a fresh context with no page open, so it calls `app.open()` first; on a
 device a test that skips `app.open()` starts where the previous test left
@@ -71,23 +82,41 @@ themselves failed or the app changed under them.
   Nest a `describe` only to share a hook or an option (a `session`,
   `agentContext`, `tags`) with some of its tests. Setup tests are the
   exception: `test.setup` must be top-level, outside any `describe`.
-- **Arrange, act, assert, in that order**, with a blank line between the
-  three blocks:
-  - Arrange reaches the state the behavior starts from: `session`,
-    `app.open` on the screen's path, data from a fixture, and a shared
-    `beforeEach`. When the app offers no shorter way, an `agent.act` or
-    `screen` lines can arrange too, as in `marks a todo as done` above.
-    End such an arrange block with a wait for the state it reached
+- **Arrange, act, assert, in that order.** Put shared arrange hooks first
+  inside `describe`, before constants and tests. Put `beforeAll` before
+  `beforeEach` when the suite uses both. Keep the act and assertion
+  blocks in the test, separated by a blank line.
+  - Arrange reaches the state the behavior starts from. Use `beforeAll`
+    for setup once per suite realm that only needs worker fixtures. Use
+    `beforeEach` for each test's starting state, including opening a
+    browser page. Declare a saved session when a test needs that state
+    and use a fixture for data creation and cleanup. Keep one-off
+    setup in the test or its fixture. End UI setup with a wait for the state it reached
     (`locator.waitFor()`, `agent.waitFor`). A setup goal that passed
     without doing its job then fails there, not at the outcome check, and
     the wait confirms the setup goals for the replay cache.
-  - Act does the one thing under test: one `agent.act` goal, or the
-    `screen` lines of one interaction. A wait for the state the action
-    triggers (`agent.waitFor`, `locator.waitFor`) closes the act block.
+  - Act pursues the test's one goal. Use precise `screen` actions when
+    an interaction matters to the requirement. In `agent.act`, spell out
+    the fields, choices, buttons, and order when they matter to the flow.
+    Start with one call. For a long form or wizard, split at a screen
+    transition only when a later step needs a specific state. Say why
+    in the test, wait for that state, and verify the full flow in a run.
+    When the act leaves a screen, wait for the state it needs first.
+    Let a locator matcher poll for the outcome. Before `agent.assert`,
+    wait for any state the agent needs to see.
   - Assert holds every `expect`, `expect.poll`, and `agent.assert`, and
-    nothing after them. No check sits between arrange and act steps. A
-    setup test's `session.save` is bookkeeping and comes after its check.
-- **One behavior per test.** A test verifies one outcome, and its title
+    nothing after them. In a test body, no check sits in arrange or act.
+    A state the test needs before it can go on is a wait on a locator
+    narrowed to that state, such as
+    `balance.filter({ hasText: '$10.00' }).waitFor()`,
+    `screen.getByRole('switch', 'Lock card', { checked: true }).waitFor()`,
+    or `heading.waitFor({ state: 'hidden' })`. A failed wait reports
+    `LOCATOR_NOT_FOUND` and a failed check `ASSERTION_FAILED`, so the
+    error code distinguishes the wait from the assertion. Use the failed
+    step to tell which state was missing. Wait for a
+    starting value only when the outcome check depends on it. A setup
+    test's `session.save` is bookkeeping and comes after its check.
+- **One behavior and one goal per test.** A test verifies one outcome. Its title
   names it: `'marks a todo as done'`, not `'todos work'` or `'adds and
   completes a todo'`. An "and" in a title usually means two tests. Several
   assertions are fine when they all check that one outcome (the count and
@@ -95,11 +124,141 @@ themselves failed or the app changed under them.
   When it starts from the first one's result, its arrange block repeats the
   first one's act (or seeds the result through the API) rather than
   chaining both into one test.
+- **Prove the change, on the record the test changed.** Before you write a
+  check, ask what wrong behavior would still pass it: a step that did
+  nothing, a deleted record, a change to the wrong record, a value that is
+  gone after a reload. `0 remaining` alone also passes when the todo was
+  deleted; the checked checkbox does not. So pick an end value the start
+  cannot already show: a spend limit other than the default, a label that
+  is absent before the act. A change to the wrong record of a list is the
+  next bullet. When the start is known, write the expected
+  value as a literal; never compute it from a screen read. Locate every
+  check inside the row, card, or dialog of the record the test made, never
+  by position such as `.first()`, where another record can match. When the
+  promise is that a change is saved, wait for the app to acknowledge it,
+  then reopen the record; that wait and the reopen end the act block.
+  When the promise is about what is stored and the project gives you a way
+  to read stored state, an API or a helper, check that too, by id and
+  every field the requirement names: a record stored again under a new id,
+  or values swapped between rows, can look right on screen. That read adds
+  to the screen check, never replaces it. Check only what the requirement
+  promises: leave out a list's order, a timestamp, or wording it does not
+  name, so a legitimate change keeps the test green. The title claims only
+  what the assert block checks.
+- **Act on the second item shown, never the first.** When a test removes,
+  edits, renames, completes, or toggles one item of a list (a row, a line,
+  a card), its arrange block adds two items, and its act picks the second
+  item the list shows. Its assert block then checks that the first item is
+  still there, unchanged. The first item is the easy pick and the wrong
+  one: an app that always changes the first row passes a test that acts on
+  the first row.
+
+  ```ts
+  // Bad: deletes the first todo, so an app that always deletes row 1 passes.
+  await agent.act(addTodo, { params: { title: other } });
+  await agent.act(addTodo, { params: { title } });
+  await screen.getByRole('button', `Delete ${other}`).tap();
+
+  // Good: deletes the second todo, then checks the first one is still there.
+  await agent.act(addTodo, { params: { title: other } });
+  await agent.act(addTodo, { params: { title } });
+  await screen.getByRole('button', `Delete ${title}`).tap();
+
+  await expect(screen.getByRole('checkbox', title)).toHaveCount(0);
+  await expect(screen.getByRole('checkbox', other)).toBeVisible();
+  ```
+
+  Before you run the file, find each test that acts on one item of a list
+  and check that it acts on the second item shown.
+- **Verify the state the action should leave behind.** When success
+  includes a saved record, wait for the confirmation before leaving the
+  first screen. Open the receipt, history, or detail page afresh and
+  compare its values with the original test inputs. A confirmation can
+  appear even when the app saves different data.
+- **Check delivery on the recipient's screen.** Keep a separate recipient
+  session open while the sender acts. Scope the assertion to the new,
+  run-unique message. If the requirement says once, assert one match
+  for that message and repeat the check after reopening history when
+  history is part of the promise. Older messages can stay on either screen.
+- **Own every record the test needs.** A fixture can create a target and a
+  similar neighbor for each test using the same setup code. Keep their
+  returned IDs and original values. After acting, use fresh reads to check
+  the target's change and the neighbor's unchanged fields. Register each
+  created record for cleanup as soon as you have its ID, so setup errors
+  and failed assertions leave no records behind.
+- **Prove a refusal leaves state unchanged.** A refusal message can
+  accompany a write. If the requirement promises a visible refusal and
+  no persisted change, check each explicitly. End the message test on
+  the refusal. For the fresh-read test, seed the target and other records,
+  try the action, wait for its refusal, and reopen the page. Wait for a
+  readiness signal independent of the outcome, such as the list finishing
+  loading. Then assert that the target and other records are still present
+  and unchanged, using their identities and a fresh persisted-state read
+  where available. If the requirement includes a retry, repeat the action
+  on that reopened state and verify its outcome as well.
+- **Each test owns its starting state.** In a browser every test starts in
+  a fresh context. With `session`, it starts from what the setup test
+  saved, cookies, local storage, and IndexedDB, never from what an earlier
+  test changed. So two tests on one session do not see each other's
+  changes to that state. Data the app keeps on its server is shared by
+  every test and every run. Create what a test changes there in a
+  `test.extend` fixture with a run-unique name, and delete it in that
+  fixture after `use()`, which runs after a failure too. With no API or
+  seed helper in reach, the fixture still owns the record: it takes `app`
+  and `screen`, creates the record through the UI before `use(name)`, and
+  after `use()` opens the list and deletes it by that name with the app's
+  own delete control. Never clean up at the end of a test body: a failed
+  check skips it, and the stray record can satisfy the next run's checks. On a device the app keeps its
+  data from test to test: reset it with `app.clearState()` (on the iOS
+  simulator also `device.clearKeychain()` when the app keeps its sign-in in
+  the keychain) and seed what the test needs the same way. An app whose backend runs in the page, on
+  IndexedDB or local storage, keeps its data in the session too, even when
+  its requests go to a URL. When you are not sure which kind you have, run
+  the test that reads the state alone: if it passes, it needs no earlier
+  test and no `serial`. Nothing branches or skips on what the app shows, in
+  a test, a helper, or a fixture's teardown (a skip on the environment or
+  config, before the first step, is fine), as in
+  `if (await card.isVisible())`, `if ((await rows.count()) > 0)`, or
+  `test.skip(await card.isVisible())`. `count()` and `isVisible()`
+  read the screen as it is now without waiting, so right after a
+  navigation they see a list that has not loaded. Give the test the state
+  it needs instead, and make a teardown delete what it owns without
+  asking: a test that deletes the record itself gets a fixture with no
+  teardown. `serial: true` is for a journey whose steps are meant to
+  chain, not a fix for a test that fails alone. Any one test passes when
+  you run it alone, by `file:line`, twice in a row.
+- **Put fixed selectors and text above the tests.** Inside the shared
+  `describe`, define stable selector inputs, test values, and prompt text
+  in plain objects or constants. In a hook or test, bind those inputs to
+  the current `screen` fixture. Keep selectors that need runtime data,
+  such as a fixture record ID, close to that data. Bind a repeated locator
+  to a local `const`. As the spec grows or another spec needs the same
+  definitions, export them from a feature-local TypeScript file and import
+  them in the specs. Name prompts for what they ask the agent to do or
+  verify. Pass variable values as named `params` so the placeholders and
+  their inputs are easy to match at the call site.
+  Use small helpers for shared actions and a [page object](https://e2e.com/docs/page-object-model)
+  when several specs drive the same screen.
+- **Pick each step and each check by what it must prove.** Use an
+  `agent.act` instruction for a long or changing path when the requirement
+  is about the result. A value the goal needs goes in its `params`, and a
+  value that changes every run goes through `unique()` so the replay cache
+  still matches. Use `screen` lines for a short, stable flow, for an
+  interaction that is itself the point of the test, such as `ignores an
+  empty submission` above, for a sign-in form in a setup test, and in a
+  project with no model. Use `agent.assert` alone when the relevant screen
+  gives the agent evidence for the full outcome. Specify what to judge,
+  including any exact value the outcome requires. Choose a locator matcher
+  when it gives a clearer signal, such as an exact count or field state.
+  Add a second check when it proves another part of the outcome. The replay
+  cache never skips an assertion. A file of
+  `screen` lines only suits a short, stable flow; for anything else, weigh
+  it with `/agentic-vs-deterministic` in the docs.
 
 For the replay cache (topic `agent`), a passing locator or engine matcher,
 `locator.waitFor`, `agent.assert`, or `agent.waitFor` confirms every
 `agent.act` before it; `expect.poll` and a plain-value `expect` confirm
-nothing, so end with a locator check too. When the test fails, every goal
+nothing. End with a check that confirms the outcome. When the test fails, every goal
 after the last passing confirmation runs live again on the next run: the
 arrange block's closing wait keeps the setup goals cached while you fix the
 act or the assertions.
@@ -183,6 +342,11 @@ reading `device`, `app`, or `screen` throws the reason.
 
 ## Fixtures
 
+Find the module that exports the project's fixture-aware `test`. Choose
+the spec's final path before writing the import, then resolve the import
+from the spec's directory. Run that spec after adding or moving it and
+confirm the runner collects and executes the intended test.
+
 Fixtures are set up on demand. A test body, a hook, and a fixture function
 name what they use by destructuring their first parameter
 (`async ({ app, screen }) => {}`), a `test.each` or `test.for` body the one
@@ -247,6 +411,11 @@ methods are.
 `screen.getBy*` builds a lazy query, resolved only by an action, read, or
 assertion. Every query also exists on a locator, scoped to its subtree.
 
+For a collection check, start at the owning list or table and query only
+its items or rows. When the requirement names the whole collection, check
+every row in that container, including duplicates. If order can change,
+sort copies before comparing the complete observed and expected lists.
+
 | Query | Matches |
 | --- | --- |
 | `getByRole(role, name?, { exact?, checked?, disabled?, selected?, expanded?, pressed?, level?, visible? })` | Semantic role, optionally by accessible name (`getByRole('button', 'Save')`; the object form `{ name }` works too) and state (`level`: heading level 1 to 6). First choice. |
@@ -269,6 +438,11 @@ Roles: `button`, `link`, `textbox`, `searchbox`, `combobox`, `listbox`,
 On the web a `contenteditable` host is a `textbox` for the agent and takes
 `fill`; from a test use `getByLabel`, `getByTestId`, or `role="textbox"` on
 the host.
+
+The second argument to `getByRole` is the element's accessible name.
+For visible text inside an unlabelled list item or status, use
+`getByRole('listitem').filter({ hasText: message })` or scope a
+`getByText(message)` query to the right part of the screen.
 
 Text matching is exact after whitespace normalization (whole string,
 case-sensitive) for a `getByRole` name, `getByLabel`, `getByPlaceholder`, and
@@ -368,6 +542,10 @@ continuously, or for the whole `timeout` when that is shorter, so it never
 returns sooner. `expect(locator, message?)`, `expect(screen, message?)`, and
 their `expect.soft` forms open each assertion failure with the message.
 `expect(value, message?)` is synchronous.
+Value matchers such as `toMatchObject` check a value and return `void`.
+Read a response into a variable, assert on that variable, then use its
+properties. Use `toMatchSchema` when you need the parsed value returned
+by a matcher.
 `expect.poll(read, { timeout?, interval?, intervals?, message? })` re-reads until a value
 matcher passes (`assertionTimeout` and `[100, 250, 500, 1000]` ms by default, stopping with the
 attempt); a throwing read keeps polling, and it is not a report step. A
@@ -457,8 +635,17 @@ Mac never serve Linux CI, so write CI's from a CI job with `-u`.
 
 ## Sign-in sessions
 
-Sign in once in a setup test, save the state under a name, and let other
-tests declare it. Selecting a dependent test alone still runs its setup.
+Save sign-in state under a name in a setup test, and declare it with
+`session`. Selecting a dependent test alone still runs its setup.
+
+For a test of two users interacting, use distinct accounts in separate
+sessions. Restore the primary user's named session through `session`.
+For the second user, call `launch(web(), options)` from the test with a
+fresh engine, then `host.newSession()`. Sign in with that user's test
+credentials and check the outcome on the screen of the user who should
+see it. See the [chat example](https://e2e.com/docs/core#open-a-host-inside-a-test)
+for sign-in and cleanup. Use `newSession({ state })` only with a core
+`SessionState` from `saveState()` or `SessionState.import()`.
 
 ```ts
 // tests/auth.setup.e2e.ts
@@ -539,8 +726,7 @@ reruns the whole flow, then waits out the 30 s action timeout. Begin each
 test as close to its screen as the app allows:
 
 - Sign in once in a setup test and declare `session` on the test (Sign-in
-  sessions). Only the setup fills the sign-in form. A session lasts one run,
-  so the setup still runs on every run, once per target for all the selected
+  sessions). The setup still runs once per target per run for all selected
   tests that declare its session.
 - Open the screen by its path, `app.open('/projects/42/settings')`, not the
   home page and three taps. `observe` over MCP prints the path of the screen
@@ -577,8 +763,10 @@ describe('project settings', { session: 'admin' }, () => {
 
     await screen.getByLabel('Name').fill('Atlas');
     await screen.getByRole('button', 'Save').tap();
+    await screen.getByRole('status').filter({ hasText: 'Saved' }).waitFor();
+    await app.open(`/projects/${project.id}/settings`); // reopened: the promise is that it is saved
 
-    await expect(screen.getByRole('status')).toHaveText('Saved');
+    await expect(screen.getByLabel('Name')).toHaveValue('Atlas');
   });
 });
 ```
@@ -695,11 +883,15 @@ them. A predicate function is `INVALID_ARGUMENT`.
 
 ## Habits
 
-- Selectors come from the source (labels, roles, text); add an `aria-label`
-  or heading where the app has no accessible name rather than fall back to
-  `browser.locator('.btn-primary')`.
-- Test data gets a run-unique name (`Invoice ${Date.now()}`) and `afterEach`
-  cleanup, so replays and retries never trip over leftovers.
+- Selectors are the names a user sees (roles, labels, text), read from the
+  live screen over MCP or from the source; add an `aria-label` or heading
+  where the app has no accessible name rather than fall back to
+  `browser.locator('.btn-primary')`. A `data-testid` in the source is not a
+  reason to use `getByTestId`: it stays the last resort.
+- Test data gets a run-unique name (`unique(\`Invoice ${Date.now()}\`)` when
+  a goal's `params` carry it) and is deleted by the fixture that created it,
+  so replays and retries never trip over leftovers ("Each test owns its
+  starting state" above).
 - APIs live in the same suite: ``fetch(`${app.baseUrl}/api/users`)``
   plus value matchers, in a `test.extend` fixture that reads `browser.cookies()`
   when the API needs the session.

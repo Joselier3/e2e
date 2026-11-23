@@ -104,29 +104,26 @@ hermes skills install e2e-inc/e2e/e2e
 
 ## 智能体如何编写和运行测试
 
-技能要求智能体先阅读配置和一个已有测试。使用 `e2e mcp` 时，它会在会话中操作流程，并在执行每个步骤时将其写入测试。对于已知字段和精确值，使用匹配到单个节点的定位器进行 `screen` 调用：
+技能要求智能体先阅读配置和一个已有测试。使用 `e2e mcp` 时，它会在会话中操作流程，并在执行每个步骤时将其写入测试。每个测试只验证一种行为：先准备起始状态，再执行被测的一个步骤，最后检查结果：
 
-```ts title="tests/checkout.e2e.ts"
-import { test, expect, credentials } from 'e2e';
+```ts title="tests/shop.e2e.ts"
+import { test, expect } from 'e2e';
 
-test('a signed-in user reaches checkout', async ({ screen, app, agent }) => {
-  const user = credentials.user('customer');
-  await app.open('/login');
-  await screen.getByLabel('Email').fill(user.username);
-  await screen.getByLabel('Password').fill(user.password);
-  await screen.getByRole('button', 'Sign in').click();
-  await expect(screen.getByRole('heading', 'Welcome back')).toBeVisible();
+test('filters the shop to items under $20', { session: 'customer' }, async ({ app, agent, screen }) => {
+  const results = screen.getByRole('status', 'Results');
+  await app.open('/shop');
+  await results.waitFor();
 
-  await agent.act('Add the cheapest item on the page to the cart');
-  await expect(screen.getByRole('status', 'Cart')).toHaveText('1 item');
-  await agent.act('Open the cart');
-  await expect(screen.getByRole('heading', 'Your cart')).toBeVisible();
+  await agent.act('show only items under $20');
+
+  await expect(results).toHaveText('3 items under $20');
 });
 ```
 
-- **每个[原子目标](/core-concepts#goals)调用一次 `agent.act`，然后调用 `expect`。** 如果智能体执行了错误的操作，`expect` 会失败。定位器匹配器或其他[验证检查](/cache#when-a-recording-is-written)也能让缓存回放该步骤。
+- **每个[原子目标](/core-concepts#goals)调用一次 `agent.act`，检查放在最后。** 如果智能体执行了错误的操作，`expect` 会失败。定位器匹配器或其他[验证检查](/cache#when-a-recording-is-written)也能让缓存回放它之前的目标。第二个结果写成第二个测试。
+- **给定位器命名。** 像 `results` 这样用到两次的定位器写成 `const`，控件改名时只需改一处。
 - **不使用固定延时。** 定位器会轮询，操作会等待目标元素，`expect` 会持续重试直到超时。
-- **通过 `credentials.user(name)` 使用机密值。** 在配置中声明机密值，绝不要写进测试。
+- **只登录一次。** [设置测试](/authentication)用 `credentials.user(name)` 填写表单，并保存 `session: 'customer'` 恢复的会话。在配置中声明凭据，绝不要写进测试。
 
 反复修改时，智能体通过 `test(` 起始行的行号，只运行当前处理的测试。使用 `--action-timeout 5000` 时，错误的定位器会在 5 秒后失败，而不是 30 秒：
 

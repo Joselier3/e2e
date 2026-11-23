@@ -128,32 +128,30 @@ hermes skills install e2e-inc/e2e/e2e
 `e2e mcp` があれば、セッション内でフローをたどりながら各ステップを書きます。
 既知のフィールドや正確な値は、`screen` の呼び出しで書きます。
 ロケーターには、1 つのノードだけに一致したものを使います。
+各テストは 1 つの動作を確認します。開始状態を準備し、対象のステップを 1 つ実行し、最後に結果を確認します。
 
-```ts title="tests/checkout.e2e.ts"
-import { test, expect, credentials } from 'e2e';
+```ts title="tests/shop.e2e.ts"
+import { test, expect } from 'e2e';
 
-test('a signed-in user reaches checkout', async ({ screen, app, agent }) => {
-  const user = credentials.user('customer');
-  await app.open('/login');
-  await screen.getByLabel('Email').fill(user.username);
-  await screen.getByLabel('Password').fill(user.password);
-  await screen.getByRole('button', 'Sign in').click();
-  await expect(screen.getByRole('heading', 'Welcome back')).toBeVisible();
+test('filters the shop to items under $20', { session: 'customer' }, async ({ app, agent, screen }) => {
+  const results = screen.getByRole('status', 'Results');
+  await app.open('/shop');
+  await results.waitFor();
 
-  await agent.act('Add the cheapest item on the page to the cart');
-  await expect(screen.getByRole('status', 'Cart')).toHaveText('1 item');
-  await agent.act('Open the cart');
-  await expect(screen.getByRole('heading', 'Your cart')).toBeVisible();
+  await agent.act('show only items under $20');
+
+  await expect(results).toHaveText('3 items under $20');
 });
 ```
 
-- **[単一のゴール](/core-concepts#goals) ごとに `agent.act` を 1 回呼び、その後に `expect` を置きます。**
+- **[単一のゴール](/core-concepts#goals) ごとに `agent.act` を 1 回呼び、確認は最後にまとめます。**
   エージェントの操作が間違っていれば `expect` が失敗します。
   ロケーターマッチャーや、その他の [検証チェック](/cache#when-a-recording-is-written) により、
-  キャッシュからステップをリプレイできるようにもなります。
+  それより前のゴールをキャッシュからリプレイできるようにもなります。2 つ目の結果は 2 つ目のテストにします。
+- **ロケーターに名前を付けます。** `results` のように 2 回使うロケーターは `const` にします。コントロール名が変わっても修正は 1 か所です。
 - **固定時間の待機は使いません。** ロケーターはポーリングし、操作は対象を待ち、
   `expect` はタイムアウトまでリトライします。
-- **シークレットは `credentials.user(name)` で渡します。** 設定に宣言し、テストには直接書かないでください。
+- **サインインは 1 回だけです。** [セットアップテスト](/authentication) が `credentials.user(name)` でフォームに入力し、`session: 'customer'` が復元するセッションを保存します。認証情報は設定に宣言し、テストには直接書かないでください。
 
 修正を繰り返す間、エージェントは対象のテストだけを、`test(` が始まる行で指定して実行します。
 `--action-timeout 5000` を付けると、誤ったロケーターが 30 秒ではなく 5 秒で失敗します。

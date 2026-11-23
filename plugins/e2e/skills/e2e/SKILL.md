@@ -5,12 +5,12 @@ description: Writes, runs, and debugs end-to-end tests for web and mobile apps w
 
 # e2e: agentic end-to-end tests
 
-e2e runs UI tests that mix agent goals with exact steps. `agent.act` drives
-one goal; `agent.assert`, `agent.waitFor`, and `agent.extract` judge the
-screen; `screen`, `app`, `browser`, and `expect` act and check exactly. UI
-targets use `@e2e-dev/web` for browsers, `@e2e-dev/mobile` for iOS
-simulators, Android emulators, and connected phones, or `@e2e-dev/desktop`
-(a prototype) for native apps on macOS.
+e2e runs UI tests that mix agent instructions with exact steps. `agent.act`
+takes actions toward a goal. Use `agent.assert`, `agent.waitFor`, and
+`agent.extract` to judge or read the screen. Use `screen`, `app`, `browser`,
+and `expect` for exact actions and checks. UI targets use `@e2e-dev/web` for
+browsers, `@e2e-dev/mobile` for iOS simulators, Android emulators, and
+connected phones, or `@e2e-dev/desktop` (a prototype) for native apps on macOS.
 
 ## Start here: pick the reference for the job
 
@@ -75,13 +75,12 @@ import { describe, test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 
 describe('billing', () => {
-  test('a member upgrades to Pro', async ({ app, agent, screen, browser }) => {
+  test('a member upgrades to Pro', async ({ app, agent, screen }) => {
     await app.open('/settings/billing');
 
     await agent.act('upgrade the workspace to the Pro plan');
 
-    await expect(screen.getByRole('status')).toContainText('Pro');
-    await expect(browser).toHaveURL('/settings/billing');
+    await expect(screen.getByRole('status', 'Current plan')).toHaveText('Pro');
   });
 });
 ```
@@ -104,30 +103,57 @@ describe('billing', () => {
    `run_code` runs JavaScript on the test API, so use it for most of a
    session's work, a loop or a read and a check in one call, over many
    single actions.
-   The walk ends with the test written. Without a
-   server, learn the accessible names the app renders from the components or
-   a `--headed` run.
+   The walk ends with the test written. Before choosing a role locator,
+   check the role and full accessible name in the state where the step runs.
+   Use the live accessibility tree, the component, or a recorded test screen.
+   If the requirement gives only visible message text, use a scoped
+   `getByText`. A requirement can call a heading a status message.
+   Without a server, inspect the component or run the test with `--headed`.
 3. Shape the file before the steps (topic `writing-tests`, "Structure"):
-   one top-level `describe` per feature, and in it one test per behavior,
-   titled with the outcome it verifies. Each test runs arrange, act, assert,
-   in that order: reach the starting state, do the one thing under test,
-   then every `expect` or `agent.assert` at the end. A second outcome worth
-   checking is a second test, so a failing title says what broke.
-   A step is an `agent.act` goal or `screen` lines. Drive the flow with
-   `agent.act`, one atomic goal per call; three goals make three calls.
+   one top-level `describe` per feature, and one behavior and one goal
+   per test. Name the outcome in the title. Put shared arrange hooks
+   directly inside `describe`, before constants and tests. Use `beforeAll`
+   for shared worker setup and `beforeEach` for per-test starting state.
+   Keep the act and assertions in the test. Describe
+   the specific steps the agent needs in `agent.act`.
+   Split that path into calls only when a later step needs a specific
+   intermediate state. Explain the split and wait for that state.
    Start the test on the screen it covers, since every rerun pays
-   for the steps before: in a browser a saved session instead of the
-   sign-in form and `app.open` on that screen's path, on a device
+   for the steps before: in a browser use `app.open` on that screen's
+   path and restore a named session when the test needs one. On a device use
    `device.openLink`, and data from the app's API (topic `writing-tests`).
-   Exact values go through `screen`: a sign-in form in a setup test, a field
-   that must receive one specific string, a count that must be one number.
-4. Run only the test you are working on:
+   A value a goal needs goes in its `params`; `screen` lines are for a
+   short, stable flow, an interaction that is itself the point, and a
+   sign-in form in a setup test. Use `agent.assert` alone when it can judge
+   the full outcome from the screen. Use `expect` for exact checks where
+   it offers a clearer signal. Scope collection checks to the named list or
+   table. For a complete collection check, compare all records and their
+   counts, sorting copies only when order can vary.
+   Put stable selectors, fixed values, and
+   prompt text inside the shared `describe`, above its tests. As the spec
+   grows, move those definitions to a feature-local TypeScript file and
+   import them. Keep selectors that need test data close to the data.
+   Use fixtures for data and cleanup (topic `writing-tests`). Check an end value
+   the start cannot already show, inside the record the test changed, so a
+   step that did nothing fails. No check sits in arrange or act: a state
+   the test needs mid-way is a wait on a locator narrowed to it. In a browser
+   each test starts from its session's saved state, not from an earlier
+   test; on a device the app keeps the data the last test stored, so reset it
+   with `app.clearState()` and seed what the test needs. Server
+   data a test changes is created and deleted in a fixture, and a test
+   never skips or branches on what the app shows.
+4. Check every test that removes, edits, or toggles one item of a list:
+   its arrange block adds two items, it acts on the second item shown,
+   never the first, and it checks that the first item is unchanged. An
+   app that always changes the first row passes a test that acts on the
+   first row.
+5. Run only the test you are working on:
    `npx e2e run tests/<feature>.e2e.ts:<line>`, the line its `test(` opens on,
    with the flags in "Rerunning a test while you fix it" below. Agent
    steps need a model in the config and that provider's authentication (a
    saved subscription login, an API key); a local endpoint may need none.
    Tests without agent steps need no model.
-5. When it fails, fix it from what the run recorded (next section).
+6. When it fails, fix it from what the run recorded (next section).
 
 ## Workflow: fixing a failed test
 
@@ -242,12 +268,18 @@ lines you changed:
   arrange, act, assert with every assertion last (topic `writing-tests`).
   Bad: one test that adds a todo, checks it, marks it done, and checks
   again. Good: `'adds a todo to the list'` and `'marks a todo as done'`,
-  the second adding its todo in its arrange block.
-- Agent instructions: one goal per `act`, the wording on screen, real values
-  in params. A goal is atomic: one outcome that one check confirms. Two
-  outcomes are two goals in two `act` calls (topic `agent`), never `'add a
-  todo and mark it done'`. Judge meaning, not phrasing: `toContain('Pro')`,
-  not an exact sentence a model produced.
+  the second adding its todo in its arrange block. A message the test
+  moves past, such as `Saved` before it reopens the record or a
+  confirmation before it opens another page, is a wait in the act block,
+  `screen.getByRole('status').filter({ hasText: 'Saved' }).waitFor()`,
+  not an `expect`. Every check reads the screen the test ends on.
+- A test that acts on one item of a list acts on the second item shown,
+  never the first, after adding two, and checks the first item is
+  unchanged (topic `writing-tests`, "Act on the second item shown").
+- Agent instructions: describe the steps toward one outcome using the
+  wording on screen. Pass values in `params` (topic `agent`). Add a
+  separate test for a second behavior. For text a model produces,
+  check the required meaning with a matcher like `toContain('Pro')`.
 - End every test that runs an agent goal with a verifying check: a
   locator matcher (`expect(locator)`), an engine matcher
   (`expect(browser).toHaveURL`), or `agent.assert`. A passing one confirms

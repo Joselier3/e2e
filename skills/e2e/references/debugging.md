@@ -162,9 +162,13 @@ With `--step`, you won't stop at steps inside an `expect.poll` read or a
 
 - A read (`textContent()`, `count()`) caught a value mid-update: use a
   matcher.
-- Shared data: unique names per run, `afterEach` cleanup, or a `serial`
-  group.
-- App not ready: assert on the element you are about to use, not the
+- Shared data: each test creates its records with run-unique names in a
+  `test.extend` fixture and deletes them after `use()`; with one app-wide
+  state no test can own, `workers: 1`. A test that passes in its file but
+  fails alone by `file:line` depends on an earlier test: give it its own
+  arrange steps, not a `serial` group (topic `writing-tests`, "Each test
+  owns its starting state").
+- App not ready: wait for the element you are about to use, not the
   previous page.
 - An agent judgment asserts exact phrasing: judge the fact, add a
   deterministic `expect` beside it.
