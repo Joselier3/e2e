@@ -469,6 +469,66 @@ describe('e2e init', () => {
     expect(read('e2e.config.ts')).toBe('export default {};\n');
   });
 
+  it('adds the packages an existing config imports and package.json lacks, at the ranges a new scaffold writes', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), [
+      "import type { E2EConfig } from 'e2e';",
+      "import { web } from '@e2e-dev/web';",
+      "import { chatgpt } from 'e2e/oauth/chatgpt';",
+      "import 'dotenv/config';",
+      "import { readFileSync } from 'node:fs';",
+      "import { helper } from './helper.ts';",
+      "import { alias } from '@/lib/alias';",
+      "// import { mobile } from '@e2e-dev/mobile';",
+      "const note = \"import { openrouter } from '@openrouter/ai-sdk-provider';\";",
+      'export default { targets: [{ engine: web() }] } satisfies E2EConfig;',
+      '',
+    ].join('\n'));
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ name: 'existing-app', type: 'module', devDependencies: { e2e: '1.2.3', zod: '^3.0.0' } }, null, 2)}\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({
+      e2e: '1.2.3',
+      zod: '^3.0.0',
+      '@e2e-dev/web': '0.x',
+      '@e2e-dev/core': '0.x',
+      '@ai-sdk/openai': '^4.0.0',
+      ai: '^7.0.0',
+    });
+    expect(output()).toContain('Add dev dependencies: @e2e-dev/web@0.x, @e2e-dev/core@0.x, @ai-sdk/openai@^4.0.0, ai@^7.0.0');
+    expect(output()).toContain('e2e.config.ts also imports dotenv, not in package.json; init has no version for it, so add it yourself');
+    stdoutSpy.mockClear();
+    expect(await init(dir, { yes: true })).toMatchObject({ exitCode: 0, result: 'already-initialized' });
+  });
+
+  it('reads re-exports and literal dynamic imports of an existing JavaScript config, and says nothing of a declared package', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.mjs'), [
+      "export { mobile } from '@e2e-dev/mobile/engine';",
+      "const { openrouter } = await import('@openrouter/ai-sdk-provider');",
+      "await import('dotenv/config');",
+      "await import(`@e2e-dev/${'web'}`);",
+      'export default {};',
+      '',
+    ].join('\n'));
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ type: 'module', dependencies: { dotenv: '^17.0.0' } })}\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(JSON.parse(read('package.json')).devDependencies).toEqual({
+      e2e: expect.any(String),
+      '@e2e-dev/mobile': '0.x',
+      '@openrouter/ai-sdk-provider': '^3.0.0',
+      '@e2e-dev/core': '0.x',
+      ai: '^7.0.0',
+      zod: '^4.1.8',
+    });
+    expect(output()).not.toContain('also imports');
+  });
+
+  it('writes no example test beside an existing config, so a deleted one stays deleted', async () => {
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    rmSync(path.join(dir, 'tests'), { recursive: true });
+    stdoutSpy.mockClear();
+    expect(await init(dir, { yes: true })).toMatchObject({ exitCode: 0, result: 'already-initialized' });
+    expect(existsSync(path.join(dir, 'tests'))).toBe(false);
+  });
+
   it('installs the skill exactly where --skills says on a re-run, leaving earlier locations untouched', async () => {
     writeCopy('.agents/skills', 'stale');
     expect((await init(dir, { yes: true, skills: ['.claude/skills'], mcp: [] })).exitCode).toBe(0);
@@ -774,10 +834,8 @@ describe('e2e init', () => {
     expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
     expect(JSON.parse(read('package.json')).scripts).toEqual({ 'test:e2e': 'e2e run' });
     if (config !== 'e2e.config.ts') expect(existsSync(path.join(dir, 'e2e.config.ts'))).toBe(false);
-    const javascript = config.endsWith('js');
-    expect(existsSync(path.join(dir, 'tests/example.e2e.js'))).toBe(javascript);
-    expect(existsSync(path.join(dir, 'tests/example.e2e.ts'))).toBe(!javascript);
-    expect(output().includes('No tsconfig.json')).toBe(!javascript);
+    expect(existsSync(path.join(dir, 'tests'))).toBe(false);
+    expect(output().includes('No tsconfig.json')).toBe(!config.endsWith('js'));
   });
 
   it('reconciles new .gitignore entries without replacing existing source files', async () => {
