@@ -381,11 +381,11 @@ describe('renderCtrfReport', () => {
       expect(adds).toMatchObject({ status: 'passed', rawStatus: 'flaky', attemptId: 'test-1-member-2', retries: 1 });
       expect(adds).not.toHaveProperty('flaky');
       // The group attempt's error is the sibling's: a member that passed carries none of it.
-      expect(adds.retryAttempts[0]).toEqual(expect.objectContaining({ status: 'passed' }));
-      expect(adds.retryAttempts[0]).not.toHaveProperty('message');
-      expect(adds.retryAttempts[0]).not.toHaveProperty('trace');
+      expect(adds!.retryAttempts[0]).toEqual(expect.objectContaining({ status: 'passed' }));
+      expect(adds!.retryAttempts[0]).not.toHaveProperty('message');
+      expect(adds!.retryAttempts[0]).not.toHaveProperty('trace');
       expect(pays).toMatchObject({ status: 'passed', rawStatus: 'flaky', flaky: true, attemptId: 'test-2-member-2', retries: 1 });
-      expect(pays.retryAttempts[0]).toMatchObject({ status: 'failed', message: 'card declined' });
+      expect(pays!.retryAttempts[0]).toMatchObject({ status: 'failed', message: 'card declined' });
       expect(document.results.summary).toMatchObject({ passed: 2, flaky: 1 });
     });
 
