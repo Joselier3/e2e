@@ -4,6 +4,28 @@ A Next.js App Router greeting app with three locator tests and two agent tests.
 
 ![Next.js example app with the greeting "hello, Ada!"](screenshot.png)
 
+## Start a new app from this example
+
+`create-next-app` copies this folder into a new directory and installs the
+dependencies:
+
+```bash
+# npm
+npx create-next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app
+cd my-app
+npm run test:e2e
+
+# pnpm
+pnpm create next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app
+cd my-app
+pnpm test:e2e
+
+# bun
+bun create next-app --example https://github.com/e2e-inc/e2e/tree/main/examples/with-next my-app
+cd my-app
+bun run test:e2e
+```
+
 ## Run
 
 Use Node 22.22.3+, 24.8+, or 26+. From this folder:
@@ -28,6 +50,7 @@ Without the key, the agent tests skip. Add `-- --no-cache` to use fresh
 model calls. Results are in `.e2e/report.json`.
 
 See [e2e.config.ts](e2e.config.ts) and [tests/](tests/) for the setup.
-For your own app, follow the [Quickstart](https://e2e.com/docs/quickstart).
+To add e2e to a Next.js app you already have, follow the
+[Next.js guide](https://e2e.com/docs/frameworks/nextjs).
 
 Last checked with e2e 0.23.1, @e2e-dev/web 0.16.0, Next.js 16.4, and Node 24.
