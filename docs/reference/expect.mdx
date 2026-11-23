@@ -109,8 +109,8 @@ await expect(screen.getByRole('dialog')).toBeVisible({ visible: false }); // as 
 #### `toBeInViewport`
 
 Waits for the one match to be shown with part of its box inside the
-viewport. A visible node can be outside it: a pager page off to the side, or
-content scrolled out of view.
+viewport. A visible node can still be outside the viewport, like a pager page
+off to the side or content scrolled out of view.
 
 ```ts
 await expect(screen.getByText('Step 2 of 3')).toBeInViewport();
@@ -118,18 +118,22 @@ await expect(screen.getByTestId('banner')).toBeInViewport({ ratio: 0.5 }); // de
 await expect(screen.getByText('Step 1 of 3')).not.toBeInViewport();
 ```
 
-- `ratio` is the share of the node's box that must be inside the viewport,
-  from `0` to `1`. `0` means any part. Any other value is `INVALID_ARGUMENT`.
-- The box is the node's `rect`, measured against the viewport size of a
-  screen observation, on the web, iOS, and Android. A node with no box is
-  outside the viewport.
-- A part that a scrolling container clips off still counts as inside, where
-  Playwright counts it as outside.
-- Where the engine reports a box already cut to its container, the cut-off
-  part does not count. On the web, a node half scrolled out of its iframe
-  reads as fully in view, and one wholly outside it has no box. On Android,
-  a row half outside its list can read as fully in view.
+- `ratio` is the share of the box that has to be inside the viewport, from
+  `0` to `1`. With `0`, any part is enough. Any other value is
+  `INVALID_ARGUMENT`.
+- The box is the node's `rect`, compared with the viewport size of a screen
+  observation, so the check is the same on the web, iOS, and Android. A node
+  without a box counts as outside.
 - Negated, it passes for a hidden, absent, or off-screen match.
+
+Only the viewport bounds the box. A part that a scrolling container clips off
+still counts as inside, where Playwright counts it as outside. When the engine
+already reports a box cut to its container, the cut-off part doesn't count at
+all:
+
+- On the web, a node half scrolled out of its iframe reads as fully in view.
+  A node fully outside its iframe doesn't have a box.
+- On Android, a row half outside its list can read as fully in view.
 
 #### `toBeAttached`
 
@@ -999,8 +1003,8 @@ export interface AsyncExpectation {
   toBeHidden(options?: { timeout?: number }): Promise<void>;
   /**
    * Waits for the one match to be shown with part of its box inside the
-   * viewport of the latest screen observation; `ratio` (0 to 1, default 0)
-   * is the share of the box that must be inside, 0 meaning any part. Negated,
+   * viewport of the latest screen observation. `ratio` (0 to 1, default 0) is
+   * the share of the box that has to be inside, and 0 means any part. Negated,
    * it passes for a hidden, absent, or off-screen match.
    */
   toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;

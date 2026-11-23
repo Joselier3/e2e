@@ -370,9 +370,9 @@ purpose. Use the workaround, or keep the test in Playwright.
   and the other roles it leaves out are type errors, and `img` reads as
   `image`. It compares the role the tree reads, where a `contenteditable`
   editor is a `textbox`.
-- `toBeInViewport` measures the node's box against the viewport alone, so a
-  pager page that a narrower scrolling container clips off still counts as
-  in view. See [`toBeInViewport`](/reference/expect#tobeinviewport).
+- In `toBeInViewport`, only the viewport bounds the node's box. A pager page
+  that a narrower scrolling container clips off still counts as in view. See
+  [`toBeInViewport`](/reference/expect#tobeinviewport).
 - A locator is strict. An action, a read, or a positive matcher on several
   matches is `LOCATOR_AMBIGUOUS`, where Playwright's `page.click(selector)`
   and `isVisible()` take the first. Narrow with `filter` or `first()`.

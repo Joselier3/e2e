@@ -1088,8 +1088,8 @@ export interface AsyncExpectation {
   toBeHidden(options?: { timeout?: number }): Promise<void>;
   /**
    * Waits for the one match to be shown with part of its box inside the
-   * viewport of the latest screen observation; `ratio` (0 to 1, default 0)
-   * is the share of the box that must be inside, 0 meaning any part. Negated,
+   * viewport of the latest screen observation. `ratio` (0 to 1, default 0) is
+   * the share of the box that has to be inside, and 0 means any part. Negated,
    * it passes for a hidden, absent, or off-screen match.
    */
   toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;
