@@ -192,6 +192,16 @@ export interface WebOptions {
    */
   readonly viewport?: ViewportSize | null;
   /**
+   * Device pixels per CSS pixel on every attempt's page, as
+   * `window.devicePixelRatio` reads it; default 1. At 2 the page renders as
+   * on a high-density display, and every saved screenshot
+   * (`app.screenshot()`, a failure's, an `agent.assert`'s) is twice the
+   * viewport's size on each side. The pixels the model reads and
+   * `toHaveScreenshot` stay at one image pixel per CSS pixel. It needs a
+   * viewport size, so `viewport: null` refuses it.
+   */
+  readonly deviceScaleFactor?: number;
+  /**
    * How the engine's own screencast records an attempt that records video.
    * A browser provider that records (`BrowserProvider.record`) records in
    * its place, and ignores these. Which attempts record is the config's
@@ -322,6 +332,7 @@ export class PlaywrightSurface {
   private session: AttemptSession | undefined;
   private readonly usedContexts = new Set<string>();
   private readonly viewport: ViewportSize | null;
+  private readonly deviceScaleFactor: number | undefined;
   private readonly screencast: WebScreencastOptions;
   /** Injected request headers, names lowercased so they replace the browser's own of the same name. */
   private readonly headers: Readonly<Record<string, string>> | undefined;
@@ -364,6 +375,7 @@ export class PlaywrightSurface {
     this.connect = options.connect;
     this.launch = options.webmcp === true ? webmcpLaunch(this.browserName) : {};
     this.viewport = options.viewport === undefined ? DEFAULT_VIEWPORT : options.viewport;
+    this.deviceScaleFactor = options.deviceScaleFactor;
     this.screencast = options.screencast ?? {};
     this.headers = options.headers === undefined ? undefined : lowercaseNames(options.headers);
     this.credentialOrigins = options.credentialOrigins;
@@ -570,6 +582,7 @@ export class PlaywrightSurface {
       acquire: (signal) => this.acquireBrowser(signal),
       contextOptions: {
         viewport: this.viewport,
+        ...(this.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: this.deviceScaleFactor }),
         acceptDownloads: true,
         ...(credentials === undefined ? {} : { httpCredentials: credentials }),
         ...(this.userAgent === undefined ? {} : { userAgent: this.userAgent }),
