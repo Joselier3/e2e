@@ -9,7 +9,7 @@ import { ConfigurationError } from '../internal/errors.ts';
 import { obj } from '../internal/objects.ts';
 import { rejectUnknownKeys } from '../internal/options.ts';
 import { didYouMean } from '../internal/suggest.ts';
-import { isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
+import { isFileBase, isImplicitTestHost, isRefusedLinkScheme, normalizeBaseUrl, portOf, requestsFreePort, siteOf, withPort, type NormalizedBaseUrl } from '../internal/urls.ts';
 import type { AppPermissionState, CommandConfig, TargetApp } from '../types.ts';
 import { checkLog, digestCommand, isRecord, normalizeCommand } from './command.ts';
 import { httpUrl } from './validate.ts';
@@ -259,7 +259,9 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
     declaredBase === undefined || !requestsFreePort(declaredBase) ? undefined : { host: new URL(declaredBase.href).hostname, port };
   const base = declaredBase !== undefined && portRequest?.port !== undefined ? withPort(declaredBase, portRequest.port) : declaredBase;
   const appPort = base === undefined ? undefined : portOf(base);
-  const hostname = base === undefined ? undefined : new URL(base.href).hostname;
+  // A file has no host: no site to read frames on, no origin, and nothing to poll.
+  const file = base !== undefined && isFileBase(base);
+  const hostname = base === undefined || file ? undefined : new URL(base.href).hostname;
 
   if (app.command === undefined && portRequest !== undefined) {
     throw new ConfigurationError(
@@ -276,9 +278,14 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
     );
   }
   const readyUrl =
-    httpUrl(app.readyUrl === undefined ? undefined : expandPort(app.readyUrl, appPort, `${where} app.readyUrl`), `${where} app.readyUrl`) ?? base?.href;
+    httpUrl(app.readyUrl === undefined ? undefined : expandPort(app.readyUrl, appPort, `${where} app.readyUrl`), `${where} app.readyUrl`) ?? (file ? undefined : base?.href);
   if (command !== undefined && readyUrl === undefined) {
-    throw new ConfigurationError('APP_URL_REQUIRED', `${where} declares app.command without a URL to poll: declare app.url or app.readyUrl beside it`);
+    throw new ConfigurationError(
+      'APP_URL_REQUIRED',
+      file
+        ? `${where} declares app.command beside a file app.url, and a file answers no readiness poll: declare app.readyUrl, the http(s) URL the command serves once it is ready`
+        : `${where} declares app.command without a URL to poll: declare app.url or app.readyUrl beside it`,
+    );
   }
 
   return {
@@ -286,7 +293,7 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
     portRequest,
     site: hostname === undefined ? undefined : siteOf(hostname),
     environment: app.environment ?? (hostname !== undefined && !isImplicitTestHost(hostname) ? 'production' : 'test'),
-    identity: app.identity ?? (declaredBase === undefined ? undefined : `${declaredBase.origin}${declaredBase.basePath}`) ?? app.bundleId ?? app.appPath,
+    identity: app.identity ?? (declaredBase === undefined ? undefined : file ? declaredBase.href : `${declaredBase.origin}${declaredBase.basePath}`) ?? app.bundleId ?? app.appPath,
     bundleId: app.bundleId,
     appPath: app.appPath,
     linkBase: app.linkBase,
@@ -306,7 +313,9 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
 export function engineAppInfo(app: ResolvedApp): EngineAppInfo {
   const { base, portRequest, site, bundleId, appPath, launchArguments, permissions } = app;
   const unassigned = portRequest !== undefined && portRequest.port === undefined;
-  return obj({ origin: unassigned ? undefined : base?.origin, site, bundleId, appPath, launchArguments, permissions });
+  // A file has no origin to scope a credential to.
+  const origin = unassigned || base === undefined || isFileBase(base) ? undefined : base.origin;
+  return obj({ origin, site, bundleId, appPath, launchArguments, permissions });
 }
 
 /**
