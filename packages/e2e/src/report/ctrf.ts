@@ -116,9 +116,10 @@ export interface CtrfReportOptions {
    */
   readonly artifactsDir?: string | undefined;
   /**
-   * The run's redaction (`FinishedRun.redact`), applied to every text field a
-   * second time, since the file is made to be sent to other services. A
-   * local link it would change is left out rather than broken.
+   * The run's redaction (`FinishedRun.redact`), applied a second time to
+   * every text the file copies from the report, before and after terminal
+   * controls are replaced, since the file is made to be sent to other
+   * services. A local link it would change is left out rather than broken.
    */
   readonly redact?: ((text: string) => string) | undefined;
 }
@@ -202,11 +203,11 @@ function attachments(view: AttemptView, options: CtrfReportOptions, clean: Clean
     if (artifact.kind === 'download') continue;
     const where = attachmentPath(artifact, options);
     // A path the redaction would change holds a secret; a link with a marker in it opens nothing.
-    if (where === undefined || (options.redact !== undefined && options.redact(where) !== where)) continue;
+    if (where === undefined || clean(where) !== where) continue;
     out.push({
       name: clean(`${artifact.kind}-${artifact.id}`),
       contentType: clean(artifact.mediaType),
-      path: clean(where),
+      path: where,
       extra: { [EXTRA]: { kind: artifact.kind, redaction: artifact.redaction, ...(shared ? { scope: 'serial-group' } : {}) } },
     });
   }
@@ -270,24 +271,28 @@ function renderRetryAttempt(view: AttemptView, number: number, options: CtrfRepo
 }
 
 /**
- * The attempts that are the test's own, in order, and the one the test
- * object stands for: the outcome's verdict attempt, the last that reached
- * the result's verdict. A serial group attempt that never reached the
- * member is not its attempt. When the verdict attempt is one of those (a
- * retry skipped the member), the test stands for no attempt, and the ones
- * it ran are history.
+ * The attempt the test object stands for, the test's own attempts before
+ * it, and how many of its own come after (retries the run cut). It stands
+ * for the outcome's verdict attempt, the last that reached the result's
+ * verdict. A serial group attempt that never reached the member is not its
+ * attempt: when the verdict attempt is one of those (a retry skipped the
+ * member), the test stands for no attempt, and the ones it ran before are
+ * history.
  */
 function representedAttempts(views: readonly AttemptView[], verdict: AttemptView): { before: AttemptView[]; represented: AttemptView | undefined; after: number } {
-  const own = views.filter((view) => view.ran);
-  const index = own.indexOf(verdict);
-  if (index === -1) return { before: own, represented: undefined, after: 0 };
-  return { before: own.slice(0, index), represented: own[index], after: own.length - index - 1 };
+  const at = views.indexOf(verdict);
+  if (at === -1) return { before: [], represented: undefined, after: 0 };
+  return {
+    before: views.slice(0, at).filter((view) => view.ran),
+    represented: verdict.ran ? verdict : undefined,
+    after: views.slice(at + 1).filter((view) => view.ran).length,
+  };
 }
 
 function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>, options: CtrfReportOptions, clean: Clean): CtrfTest {
   const view = outcome(result, groups);
   const { before, represented, after } = representedAttempts(view.attempts, view.verdict);
-  const agent = result.agent === undefined || result.agent === 'default' ? '' : ` [${result.agent}]`;
+  const agent = result.agent === 'default' ? '' : ` [${result.agent}]`;
   const status = resultStatus(result.status);
   // A serial member takes the group's status, so whether it was flaky comes from its own records.
   const flaky =
@@ -322,12 +327,12 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
     ...(message === undefined ? {} : { message }),
     ...(status === 'failed' && error !== undefined && represented !== undefined ? { trace: errorBody(clean, error, failedStepActor(represented)) } : {}),
     line: result.source.line,
-    tags: (result.tags ?? []).map(clean),
+    tags: result.tags.map(clean),
     labels: {
       target: clean(result.targetId),
       platform: clean(result.platform),
-      agent: clean(result.agent ?? 'default'),
-      repeat: result.repeat ?? 0,
+      agent: clean(result.agent),
+      repeat: result.repeat,
     },
     type: result.kind === 'setup' ? 'setup' : 'e2e',
     filePath: clean(result.file),
@@ -348,7 +353,7 @@ function osFields(os: string, clean: Clean): Record<string, string> {
 
 /**
  * Renders the report-1 document as a CTRF 0.3.0 document: one test per
- * test-target pair (the rows of `junit.xml`), each standing for one attempt
+ * `<testcase>` of `junit.xml` outside its `run` suite, each standing for one attempt
  * with the ones before it in `retryAttempts`. A run-level error never
  * becomes a test: the spec says global errors must not be counted as test
  * results, so each one is an entry of `results.errors`, and the run's exit
@@ -358,7 +363,8 @@ function osFields(os: string, clean: Clean): Record<string, string> {
 export function renderCtrfReport(report: Report1Document, options: CtrfReportOptions = {}): string {
   const { run } = report;
   const { redact } = options;
-  const clean: Clean = (text) => sanitizeRecordedText(redact === undefined ? text : redact(text));
+  // Redacted before and after the controls go: taking one out can join the two halves of a value.
+  const clean: Clean = redact === undefined ? sanitizeRecordedText : (text) => redact(sanitizeRecordedText(redact(text)));
   const groups = new Map(run.serialGroups.map((group) => [group.id, group]));
   const tests: CtrfTest[] = [];
   for (const result of run.results) {

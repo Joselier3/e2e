@@ -210,9 +210,14 @@ reporters: ['list', 'ctrf'],
   suite. Its `name` starts with the test file, and `testId` is the result
   id, the same in every run.
 - A test stands for one attempt: the last one that reached its verdict.
-  The attempts before it are `retryAttempts`. A test that passed on a retry
-  has `flaky: true`. A test in a serial group that a retry skipped stands
-  for no attempt, and the attempts it ran are its `retryAttempts`.
+  The attempts before it are `retryAttempts`, and a retry the run cut after
+  it is only counted, in `extra`. A test that failed and then passed has
+  `flaky: true`.
+- In a [serial group](/reference/test#serial), a test runs again when the
+  group retries, so it has `retries` even when it passed every time; a tool
+  that reads `retries` as flakiness counts it as flaky, while `flaky` stays
+  unset. A test a retry skipped stands for no attempt, and the attempts it
+  ran are its `retryAttempts`.
 - `status` is CTRF's `passed`, `failed`, `skipped`, or `other`. `rawStatus`
   keeps e2e's own: `timed-out` is `failed`, `interrupted` is `other`.
 - Run errors, such as a failed `afterAll`, go in `results.errors` and never
@@ -220,11 +225,12 @@ reporters: ['list', 'ctrf'],
   green, so [gate the job](/ci#gate-pull-requests) on the exit code.
 - Attachments link screenshots and videos by URL, or by path from the
   project root (`$CI_PROJECT_DIR` when set). A file outside it, and every
-  download, is left out. A test in a [serial group](/reference/test#serial)
-  lists only its own files, plus files of the group, such as its video,
-  that belong to no single test.
-- Every text field passes the run's secret redaction again. A local path
-  the redaction would change is left out.
+  download, is left out. A test in a serial group lists only its own files,
+  plus files of the group, such as its video, that belong to no single
+  test. Files of a cut retry, or of a group attempt no test ran in, are in
+  `report.json` only.
+- Every text copied from the report passes the run's secret redaction
+  again. A link the redaction would change is left out.
 - Data CTRF has no field for, such as each step's e2e status and the run's
   model tokens and cost, is under the `e2e-inc.e2e` key of each `extra`.
 

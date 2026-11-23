@@ -48,11 +48,13 @@ export interface AttemptView {
   /** The attempt's own artifacts; for a serial member, the group attempt's. */
   readonly artifacts: readonly ReportArtifact[];
   /**
-   * The artifacts that belong to this test: all of a plain attempt's. A serial
-   * member gets the ones its own records name (a step's artifact ids, a step
-   * as producer, its failure's screenshot and screen), then the group
-   * attempt's that no member's records name, marked `shared`; never a
-   * sibling's. Empty for a member the attempt never reached.
+   * The artifacts that belong to this test, in the attempt's order: all of a
+   * plain attempt's. A serial member gets the ones its own records name (a
+   * step's artifact ids, a step as producer, its failure's screenshot and
+   * screen) and the group attempt's that no member's records name, marked
+   * `shared`; never a sibling's. Empty for a member the attempt never
+   * reached. Worked out when read, so a reporter that never reads it pays
+   * nothing.
    */
   readonly owned: readonly OwnedArtifact[];
   /** What else failed after the error: a teardown hook, the engine's cleanup. */
@@ -112,7 +114,9 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       id: attempt.id,
       startedAt: attempt.startedAt,
       ran: true,
-      owned: attempt.artifacts.map((artifact) => ({ artifact, shared: false })),
+      get owned(): readonly OwnedArtifact[] {
+        return attempt.artifacts.map((artifact) => ({ artifact, shared: false }));
+      },
       status: attempt.status,
       durationMs: attempt.durationMs,
       cut: false,
@@ -189,8 +193,9 @@ function ownersOf(attempt: ReportSerialAttempt): ReadonlyMap<string, ReadonlySet
 }
 
 /**
- * A member's own artifacts in a group attempt, then the ones no member's
- * records name. A sibling's failure screenshot is never a member's.
+ * A member's own artifacts in a group attempt and the ones no member's
+ * records name, in the attempt's order. A sibling's failure screenshot is
+ * never a member's.
  */
 function memberArtifacts(attempt: ReportSerialAttempt, testId: string): OwnedArtifact[] {
   const owners = ownersOf(attempt);

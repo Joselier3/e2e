@@ -163,7 +163,7 @@ describe('renderCtrfReport', () => {
   it('keeps a harness failure failed, so a CI check reading failed counts goes red, and names its category', () => {
     const error = reportError({ category: 'infrastructure', code: 'ENGINE_CRASHED', message: 'browser went away' });
     const [test] = tests(doc({ results: [reportResult({ status: 'failed', attempts: [reportAttempt({ status: 'failed', error })] })] }));
-    expect(test).toMatchObject({ status: 'failed', rawStatus: 'failed', extra: { [KEY]: { errorCategory: 'infrastructure' } } });
+    expect(test).toMatchObject({ status: 'failed', rawStatus: 'failed', message: 'browser went away', trace: 'ENGINE_CRASHED: browser went away', extra: { [KEY]: { errorCategory: 'infrastructure' } } });
   });
 
   it('maps a timed-out result to failed and keeps the word in rawStatus', () => {
@@ -219,6 +219,25 @@ describe('renderCtrfReport', () => {
       { name: 'locator.tap tap Sign in', status: 'other', extra: { [KEY]: { status: 'cancelled', kind: 'locator', durationMs: 100 } } },
       { name: 'locator.tap tap Sign in', status: 'failed', extra: { [KEY]: { status: 'failed', kind: 'locator', durationMs: 100 } } },
     ]);
+  });
+
+  it('keeps the error on an earlier attempt that failed or was interrupted, and none on one that was skipped or passed', () => {
+    const attempts = [
+      reportAttempt({ id: 'a1', index: 0, status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED', message: 'stopped' }) }),
+      reportAttempt({ id: 'a2', index: 1, status: 'skipped', error: reportError({ message: 'not its own' }) }),
+      reportAttempt({ id: 'a3', index: 2, status: 'passed', error: reportError({ message: 'not its own either' }) }),
+      reportAttempt({ id: 'a4', index: 3, status: 'failed', error: reportError({ message: 'broke' }) }),
+      reportAttempt({ id: 'a5', index: 4 }),
+    ];
+    const [test] = tests(doc({ results: [reportResult({ status: 'flaky', attempts })] }));
+    expect(test!.retryAttempts.map((attempt: Json) => attempt.message)).toEqual(['stopped', undefined, undefined, 'broke']);
+    expect(test!.retryAttempts.map((attempt: Json) => attempt.trace === undefined)).toEqual([false, true, true, false]);
+  });
+
+  it('writes no message or trace for a passed test whose attempt carries an error', () => {
+    const [test] = tests(doc({ results: [reportResult({ attempts: [reportAttempt({ error: reportError({ message: 'covered' }) })] })] }));
+    expect(test).not.toHaveProperty('message');
+    expect(test).not.toHaveProperty('trace');
   });
 
   it('maps every earlier attempt status for retryAttempts, numbered from one', () => {
@@ -282,15 +301,49 @@ describe('renderCtrfReport', () => {
       expect(test).not.toHaveProperty('attachments');
     });
 
-    it('leaves out a local link the run redaction would change, and redacts every other text field', () => {
-      const redact = (text: string): string => text.replaceAll('Zr8Kq2', '<secret:probe>');
+    it('leaves out a local link the run redaction would change, and redacts every text the file copies from the report', () => {
+      const S = 'Zr8Kq2';
+      const redact = (text: string): string => text.replaceAll(S, '<secret:probe>');
+      const step = reportStep({ api: `api.${S}`, label: `label ${S}`, actor: `actor-${S}`, explanation: `why ${S}`, status: 'failed', error: reportError({ code: `CODE_${S}`, message: `step ${S}` }) });
+      const failed = reportResult({
+        id: 'result-1',
+        file: `tests/${S}.e2e.ts`,
+        titlePath: [`describe ${S}`, `as ${S}`],
+        tags: [S],
+        targetId: `web-${S}`,
+        platform: `plat-${S}`,
+        agent: `agent-${S}`,
+        status: 'flaky',
+        attempts: [
+          reportAttempt({ id: `attempt-${S}`, status: 'failed', steps: [step], error: reportError({ code: `CODE_${S}`, message: `saw ${S}` }), artifacts: [artifact(`shot-${S}`, { url: 'https://store.example/plain' }), artifact('hosted', { url: `https://store.example/${S}` }), artifact('shot-local')] }),
+          reportAttempt({ id: 'attempt-2', index: 1, expectedFailure: { reason: `known ${S}`, error: reportError({ code: `CODE_${S}`, message: `still ${S}` }) } }),
+        ],
+      });
+      const skipped = reportResult({ id: 'result-2', status: 'skipped', skip: { cause: 'filtered', reason: `reason ${S}`, filter: `filter-${S}` }, selected: false, attempts: [] });
+      const stopped = reportResult({ id: 'result-3', status: 'interrupted', attempts: [reportAttempt({ status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED', message: `stopped ${S}` }) })] });
       const document = render(
-        doc({ results: [reportResult({ titlePath: ['auth', 'as Zr8Kq2'], tags: ['Zr8Kq2'], status: 'failed', attempts: [reportAttempt({ status: 'failed', error: reportError({ message: 'saw Zr8Kq2' }), artifacts: [artifact('shot-1')] })] })] }),
-        { artifactsDir: 'out-Zr8Kq2/results', redact },
+        doc({
+          runner: { name: 'e2e', version: `1.0.0-${S}` },
+          vcs: { commit: 'a'.repeat(40), branch: `branch-${S}` },
+          environment: { ci: false, trustNoticeShown: false, os: `os-${S} release-${S}`, arch: 'x64', runtime: 'node' },
+          errors: [reportError({ code: `RUN_${S}`, message: `run ${S}`, phase: 'afterAll' })],
+          results: [failed, skipped, stopped],
+        }),
+        { artifactsDir: `out-${S}/results`, redact },
       );
-      expect(JSON.stringify(document)).not.toContain('Zr8Kq2');
-      expect(document.results.tests[0]).toMatchObject({ name: 'tests/auth.e2e.ts > auth > as <secret:probe> [web]', tags: ['<secret:probe>'], message: 'saw <secret:probe>' });
-      expect(document.results.tests[0]).not.toHaveProperty('attachments');
+      const text = JSON.stringify(document);
+      expect(text).not.toContain(S);
+      // Every planted text came through, as its marker: none was dropped to pass.
+      expect(text.split('<secret:probe>').length - 1).toBeGreaterThanOrEqual(30);
+      expect(document.results.tests[0].attachments ?? []).toEqual([]);
+      // A link that holds the value is left out, hosted or local; a name that holds it is redacted.
+      expect(document.results.tests[0].retryAttempts[0].attachments).toEqual([expect.objectContaining({ name: 'screenshot-shot-<secret:probe>', path: 'https://store.example/plain' })]);
+    });
+
+    it('checks the redaction again after terminal controls are taken out, which can join a value back together', () => {
+      const redact = (text: string): string => text.replaceAll('Zr8Kq2', '<secret:probe>');
+      const [test] = tests(doc({ results: [reportResult({ titlePath: ['auth', 'as Zr8\u001b[31mKq2'] })] }), { redact });
+      expect(test!.name).toBe('tests/auth.e2e.ts > auth > as <secret:probe> [web]');
     });
 
     it('leaves out a download, a withheld artifact, and a local file when no artifacts directory is known', () => {
@@ -387,6 +440,26 @@ describe('renderCtrfReport', () => {
       expect(pays).toMatchObject({ status: 'passed', rawStatus: 'flaky', flaky: true, attemptId: 'test-2-member-2', retries: 1 });
       expect(pays!.retryAttempts[0]).toMatchObject({ status: 'failed', message: 'card declined' });
       expect(document.results.summary).toMatchObject({ passed: 2, flaky: 1 });
+    });
+
+    it('never counts a member flaky when it failed on its last attempt too', () => {
+      const first = groupAttempt('group-attempt-1', [member('test-1', { status: 'failed', error: reportError() }), member('test-2', { status: 'skipped', durationMs: 0, skip: { cause: 'serial-predecessor-failed', reason: 'earlier failed' } })], { status: 'failed' });
+      const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2', status: 'failed', error: reportError() }), member('test-2', { id: 'test-2-member-2', status: 'skipped', durationMs: 0, skip: { cause: 'serial-predecessor-failed', reason: 'earlier failed' } })], { index: 1, status: 'failed' });
+      const serial = group([first, second], 'failed');
+      const [adds] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['failed', 'skipped']) }));
+      expect(adds).toMatchObject({ status: 'failed', retries: 1 });
+      expect(adds).not.toHaveProperty('flaky');
+    });
+
+    it('counts a retry the run cut after a member was skipped in cutAttempts, never in retryAttempts', () => {
+      const skip = { cause: 'serial-predecessor-failed' as const, reason: 'an earlier test in the serial group failed' };
+      const first = groupAttempt('group-attempt-1', [member('test-1'), member('test-2', { status: 'failed', error: reportError({ message: 'card declined' }) })], { status: 'failed' });
+      const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2', status: 'failed', error: reportError() }), member('test-2', { id: 'test-2-member-2', status: 'skipped', durationMs: 0, skip })], { index: 1, status: 'failed' });
+      const third = groupAttempt('group-attempt-3', [member('test-1', { id: 'test-1-member-3' }), member('test-2', { id: 'test-2-member-3', status: 'interrupted', error: reportError({ category: 'interrupted', code: 'INTERRUPTED' }) })], { index: 2, status: 'interrupted', cutRetry: true });
+      const serial = group([first, second, third], 'failed');
+      const [, pays] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['failed', 'skipped'], skip) }));
+      expect(pays).toMatchObject({ status: 'skipped', retries: 1, extra: { [KEY]: { cutAttempts: 1 } } });
+      expect(pays!.retryAttempts.map((attempt: Json) => [attempt.attemptId, attempt.status])).toEqual([['test-2-member', 'failed']]);
     });
 
     it('counts a member flaky when an earlier attempt of its own timed out', () => {
