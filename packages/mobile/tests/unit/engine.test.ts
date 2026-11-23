@@ -59,6 +59,12 @@ async function openAttempt(h: Harness, attemptId = 'a1'): Promise<void> {
   if (app.bundleId !== undefined || app.appPath !== undefined) await h.engine.session!.restart!(operation());
 }
 
+/** One `tv_remote` call, as the agent makes it. */
+function remoteTool(h: Harness, key: string): Promise<unknown> {
+  const execute = tvTools(h.engine).tv_remote!.tool.execute as (input: unknown, options: object) => Promise<unknown>;
+  return execute({ key }, { toolCallId: 'c1', messages: [] });
+}
+
 /** The observed node with this name, from a fresh observation. */
 async function observed(h: Harness, name: string): Promise<SemanticNode> {
   const snapshot = await h.engine.observe!(operation());
@@ -2618,7 +2624,7 @@ describe('device fixture', () => {
       () => device.back(),
       () => device.home(),
       () => device.pressRemote('menu'),
-      () => (tvTools(h.engine).tv_remote!.tool.execute as (input: unknown, options: object) => Promise<unknown>)({ key: 'select' }, { toolCallId: 'c1', messages: [] }),
+      () => remoteTool(h, 'select'),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),
@@ -2956,6 +2962,7 @@ describe('device fixture', () => {
       () => selected.setPermission('camera', 'grant'),
       // A remote reaches the launcher, so a test presses it with no app open.
       () => selected.pressRemote('home'),
+      () => remoteTool(h, 'home'),
       // iOS refuses going offline before any command, so the radios are Android's.
       ...(platform === 'ios' ? [
         () => selected.enrollBiometrics('touchid', true),

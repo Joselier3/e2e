@@ -166,8 +166,10 @@ export function mobileTools(
 
 /**
  * The TV remote as an agent tool, for engines that drive an Android TV or an
- * Apple TV: spread it beside `mobileTools`. It is a pack of its own, so an
- * agent on a phone is never offered a remote.
+ * Apple TV: spread it beside `mobileTools`. It is a pack of its own, so a
+ * config with no TV offers no remote. Tools are offered by platform: when a
+ * phone target shares the TV's platform, put the pack on a named agent that
+ * the TV tests select.
  */
 export function tvTools(
   ...engines: readonly [EngineHandle, ...EngineHandle[]]

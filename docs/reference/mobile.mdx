@@ -1113,12 +1113,16 @@ tools: mobileTools(iphone, pixel),
 | `alert` | gap | Accept or dismiss a system alert; prefer a listed button, whose tap replays. |
 
 `tvTools(...engines)` adds the TV remote for engines that drive an Android TV
-or an Apple TV. It is a pack of its own, so an agent on a phone is never
-offered a remote.
+or an Apple TV. It is a pack of its own, so a config with no TV offers no
+remote.
 
 ```ts
 tools: { ...mobileTools(tv), ...tvTools(tv) },
 ```
+
+Tools are offered by platform. When a phone target shares the TV's platform,
+put `tvTools` on a [named agent](/reference/config#agents) and select it on
+the TV tests.
 
 | Tool | Replay | Purpose |
 | --- | --- | --- |
