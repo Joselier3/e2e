@@ -128,6 +128,23 @@ describe('parallel scopes', () => {
     await expect(collectModule(async () => declare())).rejects.toThrow(message);
   });
 
+  it('rejects a parallel group inside an ordered scope whichever of the two is declared first', async () => {
+    await expect(
+      collectModule(async () => {
+        test.describe('inner', { parallel: true }, () => test('x', noop));
+        test.describe.configure({ parallel: false });
+      }),
+    ).rejects.toThrow('describe "inner": parallel: true cannot be set inside a scope with parallel: false');
+    await expect(
+      collectModule(async () =>
+        test.describe('outer', () => {
+          test.describe('inner', { parallel: true }, () => test('x', noop));
+          test.describe.configure({ parallel: false });
+        }),
+      ),
+    ).rejects.toThrow(/inside a scope with parallel: false/);
+  });
+
   it('rejects parallel on a serial group, as an option or configured', async () => {
     await expect(collectModule(async () => test.describe('unit', { serial: true, parallel: true }, () => test('x', noop)))).rejects.toThrow(/cannot be set on a serial group/);
     await expect(collectModule(async () => test.describe('unit', { serial: true }, () => test.describe.configure({ parallel: false })))).rejects.toThrow(

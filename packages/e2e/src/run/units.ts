@@ -90,24 +90,52 @@ export function buildWorkPlans(
     for (const file of collection.files) {
       const filePairs = runnableByFile.get(file.file);
       if (filePairs === undefined) continue;
-      const ordered = filePairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
-      const id = `file::${target.name}::${file.file}`;
-      for (const [index, unitPairs] of splitFile(ordered, target.fullyParallel, parallelism).entries()) {
-        fileUnits.push({
-          // A file that is one unit keeps the id it always had.
-          id: index === 0 ? id : `${id}::${index}`,
-          kind: 'file',
-          targetName: target.name,
-          file: file.file,
-          absolutePath: file.absolutePath,
-          pairs: unitPairs,
-          share: unitPairs.length / ordered.length,
-        });
-      }
+      fileUnits.push(...unitsOfFile(target, file, filePairs, parallelism));
     }
 
     return { target, setupUnits, fileUnits, immediate };
   });
+}
+
+/** The units that run one file's runnable pairs on a target that runs `parallelism` workers; see `splitFile`. */
+function unitsOfFile(
+  target: ResolvedTarget,
+  file: Pick<WorkUnit, 'file' | 'absolutePath'>,
+  pairs: readonly TestTargetPair[],
+  parallelism: number,
+): WorkUnit[] {
+  const ordered = pairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
+  const id = `file::${target.name}::${file.file}`;
+  return splitFile(ordered, target.fullyParallel, parallelism).map((unitPairs, index) => ({
+    // A file that is one unit keeps the id it always had.
+    id: index === 0 ? id : `${id}::${index}`,
+    kind: 'file',
+    targetName: target.name,
+    file: file.file,
+    absolutePath: file.absolutePath,
+    pairs: unitPairs,
+    share: unitPairs.length / ordered.length,
+  }));
+}
+
+/**
+ * The plan for a target whose engine's `prepare` reported `workers`, fewer
+ * than the plan was cut for: each file is cut again for that many, so its
+ * tests do not import the file and run its suite hooks more often than the
+ * workers there are can use. A file keeps the place of its first unit in
+ * the dispatch order.
+ */
+export function withWorkerCap(plan: TargetWorkPlan, workers: number): TargetWorkPlan {
+  const byFile = new Map<string, WorkUnit[]>();
+  for (const unit of plan.fileUnits) {
+    const units = byFile.get(unit.file);
+    if (units === undefined) byFile.set(unit.file, [unit]);
+    else units.push(unit);
+  }
+  const fileUnits = [...byFile.values()].flatMap((units) =>
+    units.length === 1 ? units : unitsOfFile(plan.target, units[0]!, units.flatMap((unit) => unit.pairs), workers),
+  );
+  return { ...plan, workers, fileUnits };
 }
 
 /**
@@ -121,7 +149,8 @@ export function buildWorkPlans(
  *   agent and repeat it runs as;
  * - a pair with no `beforeAll` or `afterAll` around it is a unit of its own;
  * - the pairs with such hooks share as few units as keep `parallelism`
- *   workers busy, since each unit runs the hooks again.
+ *   workers busy, since each unit runs the hooks again; an agent's or a
+ *   repeat's pairs never share a unit with another's.
  *
  * With one worker nothing can run at the same time, so the file stays whole.
  */
@@ -130,7 +159,7 @@ function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, par
   const inOrder: TestTargetPair[] = [];
   const scopes = new Map<string, TestTargetPair[]>();
   const alone: TestTargetPair[][] = [];
-  const hooked: TestTargetPair[] = [];
+  const hooked = new Map<string, TestTargetPair[]>();
   for (const pair of pairs) {
     const { declared, ordered, suiteHooks } = pair.test.parallel;
     if (!(declared || fullyParallel) || ordered === 'file') inOrder.push(pair);
@@ -139,12 +168,18 @@ function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, par
       const scope = scopes.get(key);
       if (scope === undefined) scopes.set(key, [pair]);
       else scope.push(pair);
-    } else if (suiteHooks) hooked.push(pair);
-    else alone.push([pair]);
+    } else if (suiteHooks) {
+      const key = pairKey('', pair.agent, pair.repeat);
+      const run = hooked.get(key);
+      if (run === undefined) hooked.set(key, [pair]);
+      else run.push(pair);
+    } else alone.push([pair]);
   }
-  const size = Math.ceil(hooked.length / parallelism);
   const sharing: TestTargetPair[][] = [];
-  for (let start = 0; start < hooked.length; start += size) sharing.push(hooked.slice(start, start + size));
+  for (const run of hooked.values()) {
+    const size = Math.ceil(run.length / parallelism);
+    for (let start = 0; start < run.length; start += size) sharing.push(run.slice(start, start + size));
+  }
   const split = [...scopes.values(), ...alone, ...sharing].toSorted((a, b) => a[0]!.test.declarationIndex - b[0]!.test.declarationIndex);
   return inOrder.length === 0 ? split : [inOrder, ...split];
 }

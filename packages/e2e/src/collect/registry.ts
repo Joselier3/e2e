@@ -18,7 +18,7 @@ import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
 import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
-import { checkParallel } from './parallel.ts';
+import { checkParallel, checkParallelNesting } from './parallel.ts';
 import type {
   DescribeAPI,
   DescribeConfigureOptions,
@@ -154,6 +154,7 @@ class Collector {
   private declarationCounter = 0;
   private closed = false;
   private fileParallel: boolean | undefined = undefined;
+  private readonly groups: GroupNode[] = [];
   /** Real path of the module being collected, the file a test's source prefers. */
   private readonly moduleFile: string | undefined;
 
@@ -167,6 +168,7 @@ class Collector {
 
   close(): ModuleRegistration {
     this.closed = true;
+    checkParallelNesting(this.groups, this.fileParallel);
     return { tests: this.tests, hooks: this.hooks, parallel: this.fileParallel };
   }
 
@@ -268,7 +270,7 @@ class Collector {
     if (typeof body !== 'function') throw new CollectionError('describe body must be a function');
     // The caller's own options are checked, not the copy that adds the mark, which keeps only enumerable keys.
     validateDescribeOptions(given, this.currentGroup, markFail);
-    checkParallel('describe options', given.parallel, given.serial === true, this.fileParallel, groupChain(this.currentGroup));
+    checkParallel('describe options', given.parallel, given.serial === true);
     const options = markFail ? { ...given, fail: true } : given;
     const group: GroupNode = {
       title: normalizedTitle,
@@ -277,6 +279,7 @@ class Collector {
       serial: options.serial === true,
       parallel: options.parallel,
     };
+    this.groups.push(group);
     const previous = this.currentGroup;
     this.currentGroup = group;
     try {
@@ -304,7 +307,7 @@ class Collector {
     if ((scope === undefined ? this.fileParallel : scope.parallel) !== undefined) {
       throw new CollectionError(`${api}: parallel is already set for this scope`);
     }
-    checkParallel(api, options.parallel, scope?.serial === true, this.fileParallel, groupChain(scope?.parent));
+    checkParallel(api, options.parallel, scope?.serial === true);
     if (scope === undefined) this.fileParallel = options.parallel;
     else scope.parallel = options.parallel;
   }

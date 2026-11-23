@@ -6,18 +6,9 @@ import type { GroupNode, ModuleRegistration } from './registry.ts';
 
 /**
  * Checks a `parallel` value about to be set on a scope: the file, or a group
- * whose `serial` is given. `fileParallel` and `around` are the scopes around
- * it: the file's `parallel`, and the groups enclosing it. A parallel scope
- * inside one that runs in order is refused, as the tests of a serial group
- * or a `parallel: false` scope stay on one worker.
+ * whose `serial` is given.
  */
-export function checkParallel(
-  api: string,
-  value: unknown,
-  serial: boolean,
-  fileParallel: boolean | undefined,
-  around: readonly GroupNode[],
-): asserts value is boolean | undefined {
+export function checkParallel(api: string, value: unknown, serial: boolean): asserts value is boolean | undefined {
   if (value === undefined) return;
   if (typeof value !== 'boolean') {
     throw new CollectionError(`${api}: parallel must be true or false, got ${describeValue(value)}`);
@@ -25,12 +16,26 @@ export function checkParallel(
   if (serial) {
     throw new CollectionError(`${api}: parallel cannot be set on a serial group, which runs as one unit on one worker`);
   }
-  if (!value) return;
-  if (around.some((group) => group.serial)) {
-    throw new CollectionError(`${api}: parallel: true cannot be set inside a serial group, which runs as one unit on one worker`);
-  }
-  if (fileParallel === false || around.some((group) => group.parallel === false)) {
-    throw new CollectionError(`${api}: parallel: true cannot be set inside a scope with parallel: false, which runs in order on one worker`);
+}
+
+/**
+ * Refuses a parallel group inside a scope that runs in order, as the tests
+ * of a serial group or a `parallel: false` scope stay on one worker. Checked
+ * once the file has registered, since `describe.configure()` may set a
+ * scope's `parallel` after the groups inside it were declared.
+ */
+export function checkParallelNesting(groups: readonly GroupNode[], fileParallel: boolean | undefined): void {
+  for (const group of groups) {
+    if (group.parallel !== true) continue;
+    const around: GroupNode[] = [];
+    for (let parent = group.parent; parent !== undefined; parent = parent.parent) around.push(parent);
+    const where = `describe ${JSON.stringify(group.title)}`;
+    if (around.some((parent) => parent.serial)) {
+      throw new CollectionError(`${where}: parallel: true cannot be set inside a serial group, which runs as one unit on one worker`);
+    }
+    if (fileParallel === false || around.some((parent) => parent.parallel === false)) {
+      throw new CollectionError(`${where}: parallel: true cannot be set inside a scope with parallel: false, which runs in order on one worker`);
+    }
   }
 }
 

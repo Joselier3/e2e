@@ -49,7 +49,7 @@ import { cleanupErrorsOf, someSkippedAfterFailure, tracedResultIds, type ResultR
 import { runUnits, type TargetFailure } from './scheduler.ts';
 import { pauseEvents, type BeforeStep } from './step-hold.ts';
 import { hostReporters } from './reporter-host.ts';
-import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, type TargetWorkPlan, type TimeLimit } from './units.ts';
+import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, withWorkerCap, type TargetWorkPlan, type TimeLimit } from './units.ts';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import type { RunnerOutput } from './process-output.ts';
@@ -1030,10 +1030,11 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const hasWork = plans.some((plan) => plan.setupUnits.length + plan.fileUnits.length > 0);
     // Starting long files early only pays when other workers take the rest, so only such a run reads the timings history.
     const previous = runWorkers > 1 ? await loadTimings(timingsPath(config), outputLayout(config.output).report) : undefined;
-    plans = orderWorkPlans(plans, {
+    const order: Parameters<typeof orderWorkPlans>[1] = {
       relevanceOf: (testId) => relevance.get(testId) ?? 0,
       durationOf: (targetName, file) => previous?.get(fileDurationKey(targetName, file)),
-    });
+    };
+    plans = orderWorkPlans(plans, order);
     const timeLimit: TimeLimit | undefined =
       options.maxDuration !== undefined
         ? { ms: options.maxDuration, source: '--max-duration' }
@@ -1058,6 +1059,8 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
             emit,
           ),
         );
+        // A target `prepare` gave fewer workers had its files cut again; the order is theirs to take anew.
+        plans = orderWorkPlans(plans, order);
       } catch (cause) {
         if (!interrupted.aborted) recordFailure(cause, 'launch');
         return;
@@ -1344,8 +1347,8 @@ function withPreparedWorkers(
     );
   }
   return {
-    ...plan,
-    ...(workers === undefined ? {} : { workers }),
+    // Fewer workers than the files were cut for: cut them again, so no test pays for parallelism the target lacks.
+    ...(workers === undefined ? plan : workers < slots ? withWorkerCap(plan, workers) : { ...plan, workers }),
     ...(result?.env === undefined ? {} : { env: result.env }),
   };
 }
