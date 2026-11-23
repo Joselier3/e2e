@@ -19,6 +19,21 @@ type ReportSerialGroup = ReportRun['serialGroups'][number];
 /** Statuses that count as a failure of the run. `--last-failed` also runs an interrupted test again, but that one reached no verdict. */
 const FAILED_STATUSES = new Set<ReportResult['status']>(['failed', 'timed-out']);
 
+/** Skips of a test the run meant to carry out and never reached, as opposed to one it chose not to run. */
+const UNREACHED_SKIPS = new Set<NonNullable<ReportResult['skip']>['cause']>([
+  'setup-failed',
+  'serial-predecessor-failed',
+  'hook-failed',
+  'infrastructure-unavailable',
+  'failure-limit',
+  'time-limit',
+]);
+
+/** Whether the run reached no verdict of its own for a result: it was interrupted, or skipped before it could run. */
+function unreached(result: ReportResult): boolean {
+  return result.status === 'interrupted' || (result.status === 'skipped' && result.skip !== undefined && UNREACHED_SKIPS.has(result.skip.cause));
+}
+
 /**
  * A test per target and agent, whatever its `--repeat-each` run: the identity
  * `--last-failed` selects by, so a rerun without the flag runs once a test any
@@ -32,22 +47,25 @@ function testKey(result: ReportResult): string {
  * The rerun's result with the run before's attempts in front of its own,
  * numbered again from 0: the same test's result there, and the further
  * repeats the rerun has no result of its own for. A pass after a failure
- * there, or after a run that was already flaky, is flaky; an interrupted
- * rerun of a test that failed there keeps that failure.
+ * there, or after a run that was already flaky, is flaky. A rerun that never
+ * reached the test (interrupted, or skipped by a failed setup, predecessor,
+ * or hook, or a run limit) keeps the verdict it had, and the serial group its
+ * attempts live on. A serial member's attempts live on its group, so its
+ * result lists none, whatever it was before.
  */
 function foldRerun(current: ReportResult, history: readonly ReportResult[]): ReportResult {
   if (history.length === 0) return current;
   const before = history.toSorted((a, b) => a.repeat - b.repeat);
-  const attempts = [...before.flatMap((result) => result.attempts), ...current.attempts].map((attempt, index) => ({ ...attempt, index }));
   const failure = before.findLast((result) => FAILED_STATUSES.has(result.status));
   const wasFlaky = before.some((result) => result.status === 'flaky');
-  const status =
-    current.status === 'passed' && (failure !== undefined || wasFlaky)
-      ? 'flaky'
-      : current.status === 'interrupted' && failure !== undefined
-        ? failure.status
-        : current.status;
-  return { ...current, status, attempts };
+  const kept = failure?.status ?? (wasFlaky ? 'flaky' : undefined);
+  const status = current.status === 'passed' && kept !== undefined ? 'flaky' : unreached(current) && kept !== undefined ? kept : current.status;
+  const serialGroupId = current.serialGroupId ?? (unreached(current) ? before.findLast((result) => result.serialGroupId !== undefined)?.serialGroupId : undefined);
+  const attempts =
+    serialGroupId === undefined
+      ? [...before.flatMap((result) => result.attempts), ...current.attempts].map((attempt, index) => ({ ...attempt, index }))
+      : [];
+  return { ...current, status, attempts, ...(serialGroupId === undefined ? {} : { serialGroupId }) };
 }
 
 /**
@@ -118,8 +136,9 @@ function runDuration(run: ReportRun): number {
  * suite hook failure whose scope it did not run again (`run.carried`). Then
  * the fold fails, since the suite is not known to pass. A carried test the
  * first pass interrupted reached no verdict: it leaves the outcome alone, and
- * the fold does not read as a pass. The first run's start time and shard are
- * kept; the duration and usage are both runs' added up. The rerun takes the
+ * the fold does not read as a pass. The first run's start time and shard
+ * (or that it had none) are kept; the duration and usage are both runs'
+ * added up. The rerun takes the
  * run before's filter records and the change they judged, since the rows
  * those filters left out are the run before's too. `lastRun` may itself be a
  * fold, which is how the runner chains reruns: its rows then hold every
@@ -150,7 +169,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   const absorbed = new Map<string, Set<string>>();
   for (const result of current.run.results) {
     const previous = beforeById.get(result.id);
-    if (!result.selected) {
+    if (result.selected === false) {
       // A row the run before holds a result for has every attempt so far; a carried one only the last run's.
       const held = previous !== undefined && previous.selected !== false ? previous : undefined;
       results.push(held ?? carriedById.get(result.id) ?? previous ?? result);
@@ -187,11 +206,13 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   const carriedFailure =
     carriedErrors.length > 0 ||
     [...carriedById.values()].some((result) => result.status !== 'interrupted') ||
-    results.some((result) => result.selected && FAILED_STATUSES.has(result.status));
+    results.some((result) => result.selected !== false && FAILED_STATUSES.has(result.status));
+  // The run that chose the tests decides the shard, so the rerun's own is dropped.
+  const { shard: _rerunShard, ...currentRun } = current.run;
   return {
     ...current,
     run: {
-      ...current.run,
+      ...currentRun,
       status: carriedFailure && current.run.status === 'passed' ? 'failed' : current.run.status,
       exitCode: carriedFailure && current.run.exitCode === 0 ? 1 : current.run.exitCode,
       startedAt: lastRun.run.startedAt,
@@ -203,7 +224,6 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       usage: addUsage(lastRun.run.usage, current.run.usage, results.length),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
-      // The run that chose the tests decides the shard, so a plain rerun of a shard keeps it.
       ...(lastRun.run.shard === undefined ? {} : { shard: lastRun.run.shard }),
     },
   };

@@ -429,4 +429,64 @@ describe('foldLastRun', () => {
     expect(folded.run.serialGroups.map((group) => [group.id, group.attempts.map((entry) => entry.status)])).toEqual([['g0', ['passed', 'failed', 'passed']]]);
     expect(folded.run.results.map((entry) => [entry.repeat, entry.status, entry.serialGroupId])).toEqual([[0, 'flaky', 'g0']]);
   });
+
+  it('takes the shard from the run that chose the tests, and none when it was not sharded', () => {
+    // The fixture report is a shard; these runs say for themselves whether they were.
+    const unsharded = (document: Report): Report => {
+      const { shard: _shard, ...run } = document.run;
+      return { ...document, run };
+    };
+    const whole = unsharded(report({ status: 'failed', results: [result({ title: 'owed', status: 'failed', attempts: [failedAttempt] })] }));
+    const sharded = { ...rerun, run: { ...rerun.run, shard: { index: 1, total: 2 } } };
+    expect(foldLastRun(sharded, whole).run.shard).toBeUndefined();
+    const firstShard = { ...whole, run: { ...whole.run, shard: { index: 3, total: 4 } } };
+    expect(foldLastRun(unsharded(rerun), firstShard).run.shard).toEqual({ index: 3, total: 4 });
+    expect(foldLastRun(sharded, firstShard).run.shard).toEqual({ index: 3, total: 4 });
+  });
+
+  it('keeps the earlier verdict and serial group of a test the rerun never reached, so a later pass is flaky', () => {
+    const member = (status: 'failed' | 'skipped' | 'passed', group?: string, skip?: Report['run']['results'][number]['skip']) =>
+      result({ title: ['wizard', 'step two'], status, ...(group === undefined ? {} : { serialGroupId: group }), ...(skip === undefined ? {} : { skip }) });
+    const first = member('failed', 'g1');
+    const failedRun = report({ status: 'failed', results: [first], serialGroups: [serialGroup('g1', first.testId, 'failed')] });
+    // A failure limit stopped the rerun before the group started: the member was never reached and names no group.
+    const stopped = report({ status: 'failed', results: [member('skipped', undefined, { cause: 'failure-limit', reason: 'the run stopped at --max-failures 1' })] });
+    const unreached = foldLastRun(stopped, failedRun);
+    expect(unreached.run.results.map((entry) => [entry.status, entry.serialGroupId])).toEqual([['failed', 'g1']]);
+    expect(unreached.run.summary).toMatchObject({ executed: 1, failed: 1 });
+    const passes = report({ results: [member('passed', 'g1')], serialGroups: [serialGroup('g1', first.testId, 'passed')] });
+    expect(foldLastRun(passes, unreached).run.results.map((entry) => entry.status)).toEqual(['flaky']);
+  });
+
+  it('keeps the attempts of a test that became a serial member on its group, never on the result', () => {
+    const standalone = report({ status: 'failed', results: [result({ title: ['wizard', 'step one'], status: 'failed', attempts: [failedAttempt] })] });
+    const nowSerial = result({ title: ['wizard', 'step one'], status: 'passed', serialGroupId: 'g1' });
+    const again = report({ results: [nowSerial], serialGroups: [serialGroup('g1', nowSerial.testId, 'passed')] });
+    const folded = foldLastRun(again, standalone);
+    expect(folded.run.results.map((entry) => [entry.status, entry.attempts.length, entry.serialGroupId])).toEqual([['flaky', 0, 'g1']]);
+  });
+
+  it('counts a row an older report wrote without selected as selected, the way the page reads it', () => {
+    const older = report({ status: 'failed', results: [result({ title: 'steady', status: 'passed', attempts: [attempt()] }), result({ title: 'broken', status: 'failed', attempts: [failedAttempt] })] });
+    for (const row of older.run.results as readonly { selected?: boolean }[]) delete row.selected;
+    const again = report({
+      results: [
+        result({ title: 'steady', status: 'skipped', selected: false, skip: leftOut }),
+        result({ title: 'broken', status: 'passed', attempts: [attempt()] }),
+      ],
+    });
+    expect(foldLastRun(again, older).run.summary).toMatchObject({ selected: 2, passed: 1, flaky: 1 });
+  });
+
+  it('adds up the runs\' usage, and keeps the larger of each per-step maximum (guard)', () => {
+    const usage = (n: number, extra: object = {}) => ({
+      discoveredResults: 9, maxAgentContextBytes: n, maxLedgerBytes: n, maxObservationBytes: n, artifactBytes: n, downloads: n, events: n, modelTokens: n, maxModelCallsInStep: n, maxActionStepsInStep: n, ...extra,
+    });
+    const before = { ...firstPass, run: { ...firstPass.run, usage: usage(5, { modelCachedTokens: 2, estimatedCostUsd: 0.25 }) } };
+    const after = { ...rerun, run: { ...rerun.run, usage: usage(3) } };
+    expect(foldLastRun(after, before).run.usage).toEqual({
+      discoveredResults: 5, maxAgentContextBytes: 5, maxLedgerBytes: 5, maxObservationBytes: 5, artifactBytes: 8, downloads: 8, events: 8, modelTokens: 8,
+      maxModelCallsInStep: 5, maxActionStepsInStep: 5, modelCachedTokens: 2, estimatedCostUsd: 0.25,
+    });
+  });
 });

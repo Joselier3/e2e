@@ -817,8 +817,7 @@ function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetP
     if (pair.disposition === 'filtered') return pair;
     if (pair.disposition === 'skip') {
       if (previousKept) return pair;
-      const skip = pair.skip === undefined ? { cause: 'filtered' as const, reason: FILTERED_REASON.shard } : pair.skip;
-      return { ...pair, disposition: 'filtered' as const, skip: { ...skip, otherShard: true as const } };
+      return { ...pair, disposition: 'filtered' as const, ...(pair.skip === undefined ? {} : { skip: { ...pair.skip, otherShard: true as const } }) };
     }
     previousKept = kept.has(shardItem(pair));
     if (previousKept) return pair;

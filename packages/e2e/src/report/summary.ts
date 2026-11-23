@@ -8,7 +8,8 @@ import { memberRan } from '@e2e-dev/core/lib/run/records';
 import type { ReportResult, ReportSerialGroup, ReportSummary } from './build.ts';
 
 /**
- * Counts `results`: the status counts are over the selected ones and add up
+ * Counts `results`: the status counts are over the selected ones (every row
+ * not marked `selected: false`) and add up
  * to `selected`; a result executed when it made an attempt, or, for a serial
  * member, when one of its group's attempts ran its body (a body that skipped
  * itself included).
@@ -24,7 +25,8 @@ export function summarizeResults(results: readonly ReportResult[], serialGroups:
     if (result.attempts.length > 0 || (result.serialGroupId !== undefined && ranMembers.has(`${result.serialGroupId}\u0000${result.testId}`))) {
       summary.executed += 1;
     }
-    if (!result.selected) continue;
+    // A row an older report wrote without `selected` was selected.
+    if (result.selected === false) continue;
     summary.selected += 1;
     switch (result.status) {
       case 'passed':

@@ -126,8 +126,8 @@ const USAGE_FIELDS = [
 
 /**
  * Whether a report holds what `foldLastRun` reads beyond what `isReport`
- * checks: the run's project, start, and usage, and each result's test,
- * target, agent, and repeat. A history file without them is no history,
+ * checks: the run's project, start, and usage, each result's test, target,
+ * agent, and repeat, and each serial group's id, repeat, and members. A history file without them is no history,
  * rather than a fold that throws part way.
  */
 function isFoldable(document: Report1Document): boolean {
@@ -144,7 +144,25 @@ function isFoldable(document: Report1Document): boolean {
     results.every(
       (result) =>
         typeof result.testId === 'string' && typeof result.targetId === 'string' && typeof result.agent === 'string' && typeof result.repeat === 'number',
-    )
+    ) &&
+    [...document.run.serialGroups, ...(document.run.carried?.serialGroups ?? [])].every(isFoldableGroup)
+  );
+}
+
+/** Whether a serial group has the id, repeat, and attempt members the fold and the tally read. */
+function isFoldableGroup(group: unknown): boolean {
+  const { id, repeat, attempts } = group as { id?: unknown; repeat?: unknown; attempts?: unknown };
+  return (
+    typeof id === 'string' &&
+    typeof repeat === 'number' &&
+    Array.isArray(attempts) &&
+    attempts.every((attempt) => {
+      const { members } = attempt as { members?: unknown };
+      return (
+        Array.isArray(members) &&
+        members.every((member) => typeof member === 'object' && member !== null && typeof (member as { testId?: unknown }).testId === 'string' && typeof (member as { status?: unknown }).status === 'string')
+      );
+    })
   );
 }
 
