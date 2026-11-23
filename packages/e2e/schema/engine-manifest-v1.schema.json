@@ -93,7 +93,8 @@
           "setInputFiles",
           "dragTo",
           "swipe",
-          "blur"
+          "blur",
+          "setInputFilePayloads"
         ]
       }
     },
@@ -119,6 +120,10 @@
     },
     "remoteKeys": {
       "description": "Present as true when the engine presses TV remote keys, which reach it through keyboard/press.",
+      "type": "boolean"
+    },
+    "selectsDevice": {
+      "description": "prepare binds the device e2e run --device names.",
       "type": "boolean"
     },
     "isolation": {
@@ -416,6 +421,27 @@
           "methods": {
             "contains": {
               "const": "artifacts/screenshot"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "selectsDevice": {
+            "const": true
+          }
+        },
+        "required": [
+          "selectsDevice"
+        ]
+      },
+      "then": {
+        "properties": {
+          "methods": {
+            "contains": {
+              "const": "lifecycle/prepare"
             }
           }
         }

@@ -223,6 +223,9 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 ({ targets, cache: 'read-write' }) satisfies E2EConfig;
 ({ targets, failOnSkippedFailure: true }) satisfies E2EConfig;
 ({ targets, maxDuration: 900_000 }) satisfies E2EConfig;
+({ targets, toPass: { timeout: 200, intervals: [10, 20] } }) satisfies E2EConfig;
+// @ts-expect-error Only timeout and intervals are valid in toPass config.
+({ targets, toPass: { timeout: 200, interval: 10 } }) satisfies E2EConfig;
 ({ targets, cache: { mode: 'read-only', store: remoteStore, dir: 'shared-cache' } }) satisfies E2EConfig;
 ({ targets: [{ platform: 'ios' }] }) satisfies E2EConfig;
 // @ts-expect-error specVersion is gone; the runner version is the format version
@@ -244,6 +247,8 @@ customExecutorObservation.keyboardVisible satisfies boolean | undefined;
 // @ts-expect-error an engine only drives the app: the target declares it
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, app: { url: 'http://localhost:3000' } }) satisfies Engine;
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, validateApp: (app, { targetName }) => void [app.bundleId, targetName] }) satisfies Engine;
+// `e2e run --device`: an engine that selects devices reads the name `prepare` hands it.
+({ name: 'toy', version: '1.0.0', spiVersion: 1, selectsDevice: true, prepare: async ({ device }) => void (device satisfies string | undefined) }) satisfies Engine;
 // @ts-expect-error a target declares its app; there is no services list in this version
 ({ targets: [{ engine, app: { url: 'http://localhost:3000' }, services: [] }] }) satisfies E2EConfig;
 declare const model: ModelInstance;
@@ -507,6 +512,12 @@ void asyncExpectation.toHaveRole('paragraph');
 void asyncExpectation.toHaveRole(/button/);
 // @ts-expect-error a role has no case to ignore
 void asyncExpectation.toHaveRole('button', { ignoreCase: true });
+// toBeEditable takes Playwright's editable flag and a timeout.
+void (asyncExpectation.not.toBeEditable({ editable: false, timeout: 1000 }) satisfies Promise<void>);
+// @ts-expect-error the flag is a boolean
+void asyncExpectation.toBeEditable({ editable: 'yes' });
+// @ts-expect-error toBeEditable has no enabled flag; that is toBeEnabled's
+void asyncExpectation.toBeEditable({ enabled: true });
 
 void (screen.getByRole('row').filter({ hasNotText: 'Paid' }) satisfies Locator);
 void (screen.getByRole('row').filter({ hasText: 'Invoice', hasNotText: /Paid/i }) satisfies Locator);
@@ -522,8 +533,24 @@ declare const pollMatcherNames: Exclude<keyof PollExpectation<string>, 'not'>;
 declare const valueMatcherNames: Exclude<keyof ValueExpectation<string>, 'not'>;
 pollMatcherNames satisfies typeof valueMatcherNames;
 valueMatcherNames satisfies typeof pollMatcherNames;
-void (expect.poll(() => 'x', { timeout: 15_000, interval: 250, message: 'never settled' }).toBe('x') satisfies Promise<void>);
+void (expect.poll(() => 'x', { timeout: 15_000, intervals: [250], message: 'never settled' }).toBe('x') satisfies Promise<void>);
+void (expect.poll(() => 'x', { interval: 250 }).toBe('x') satisfies Promise<void>);
 void (expect.poll(async () => 1).not.toBeGreaterThan(1) satisfies Promise<void>);
+void (expect.poll(() => 1, { intervals: [10, 50] as const }).toBe(1) satisfies Promise<void>);
+const block = async () => 1;
+void (expect(block, 'eventually').toPass({ intervals: [10, 50], timeout: 500 }) satisfies Promise<void>);
+void (expect(block).not.toPass() satisfies Promise<void>);
+void (expect.soft(block).toPass() satisfies Promise<void>);
+void (expect.soft(block).not.toPass() satisfies Promise<void>);
+expect(block).toBe(block);
+// @ts-expect-error A function is required for toPass.
+void expect('x').toPass();
+// @ts-expect-error Only the value matchers are available after expect.poll.
+void expect.poll(() => 1).toPass();
+// @ts-expect-error Set the message in expect(fn, message).
+void expect(block).toPass({ message: 'retry' });
+// @ts-expect-error The value overload is selected for a value of type any.
+void expect(JSON.parse('{}')).toPass();
 // @ts-expect-error the matcher is typed by what the read returns
 void expect.poll(() => 'x').toBe(1);
 // @ts-expect-error poll takes a read function, not the value itself
@@ -683,7 +710,7 @@ test.for([1])('no body');
 test.each([[1, 'one']])('%i', async (_n, { app }) => { void app; });
 // @ts-expect-error test.for passes the row whole, not spread
 test.for([[1, 'one']])('%i', async (n: number) => { void n; });
-// fail takes the same three shapes and returns nothing inside a body; describe and setup take no fail option.
+// fail takes the same three shapes and returns nothing inside a body; a group takes it as an option or describe.fail, setup never.
 test.fail(true, 'known gap');
 test.fail('known gap');
 test.setTimeout(60_000);
@@ -692,8 +719,31 @@ test.setTimeout('60s');
 test.fail('gap', async () => {}) satisfies ReturnType<typeof test>;
 void (test.fail(false) satisfies void);
 test('gap', { fail: 'known gap' }, async () => {});
-// @ts-expect-error a group cannot expect failure; mark each test
-test.describe('gaps', { fail: true }, () => {});
+test.describe('gaps', { fail: 'legacy checkout' }, () => {});
+void (test.describe.fail('gaps', () => {}) satisfies void);
+describe.fail('gaps', { tags: ['legacy'] }, () => {});
+// @ts-expect-error describe.fail is already marked; a reason goes in describe's fail option
+describe.fail('gaps', { fail: 'legacy checkout' }, () => {});
+// @ts-expect-error describe.fail registration must be synchronous
+test.describe.fail('asynchronous', async () => {});
+// @ts-expect-error a group cannot be focused; describe options take no only
+test.describe.fail('gaps', { only: true }, () => {});
+
+declare const payloadUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFilePayloads' }>;
+payloadUploadAction.files[0]!.buffer satisfies Uint8Array;
+// Existing engines can keep reading paths after narrowing the original action kind.
+declare const pathUploadAction: Extract<import('../../src/engine/index.ts').LocatorAction, { kind: 'setInputFiles' }>;
+pathUploadAction.paths satisfies readonly string[];
+void screen.getByLabel('Receipt').setInputFiles({ name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('receipt') });
+void screen.getByLabel('Receipt').setInputFiles([{ name: 'empty.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
+void screen.getByLabel('Receipt').setInputFiles(['fixtures/receipt.txt']);
+void screen.getByLabel('Receipt').setInputFiles([]);
+// @ts-expect-error file payloads require bytes, not an encoded string
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', mimeType: 'text/plain', buffer: 'data' });
+// @ts-expect-error a payload requires its MIME type
+void screen.getByLabel('Receipt').setInputFiles({ name: 'a.txt', buffer: Buffer.alloc(0) });
+// @ts-expect-error paths and payloads cannot be mixed in one array
+void screen.getByLabel('Receipt').setInputFiles(['a.txt', { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.alloc(0) }]);
 void screen.getByLabel('Plan').selectOption({ value: 'pro' });
 // @ts-expect-error one of label, value, or index, never two
 void screen.getByLabel('Plan').selectOption({ value: 'pro', index: 1 });
@@ -1113,6 +1163,8 @@ void (expect(await readBody()).toMatchSchema(userSchema) satisfies { id: number 
 void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
+// @ts-expect-error A function isn't inferred from a return-only generic.
+void expect(await readBody()).toPass();
 
 // describe and the hooks are top-level imports too, typed as their test.* forms.
 describe('group', { tags: ['smoke'] }, () => {
