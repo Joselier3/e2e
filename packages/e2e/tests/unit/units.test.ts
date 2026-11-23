@@ -260,6 +260,25 @@ describe('buildWorkPlans with parallel scopes', () => {
     expect(unitsOf(tests, { workers: 8 })).toEqual(tests.map((test) => [test.title]));
   });
 
+  it('never shares a unit between the agents a hooked test or an ordered scope runs as', () => {
+    const hooked = { declared: true, ordered: undefined, suiteHooks: true };
+    const serial = { declared: true, ordered: 'group-0', suiteHooks: false };
+    const tests = [
+      makeTest(FILE, 'hooked 1', 0, { parallel: hooked }),
+      makeTest(FILE, 'hooked 2', 1, { parallel: hooked }),
+      makeTest(FILE, 'step 1', 2, { parallel: serial }),
+      makeTest(FILE, 'step 2', 3, { parallel: serial }),
+    ];
+    const pairs = tests.flatMap((test) => ['fast', 'smart'].map((agent) => makePair(test, { agent })));
+    const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 1 + 1);
+    const units = plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.agent}`));
+    expect(units).toHaveLength(6);
+    expect(units).toEqual(
+      expect.arrayContaining([['hooked 1@fast'], ['hooked 2@fast'], ['hooked 1@smart'], ['hooked 2@smart'], ['step 1@fast', 'step 2@fast'], ['step 1@smart', 'step 2@smart']]),
+    );
+  });
+
   it('never shares a unit between the repeats of tests with suite hooks', () => {
     const hooked = { declared: true, ordered: undefined, suiteHooks: true };
     const tests = [makeTest(FILE, 'a', 0, { parallel: hooked }), makeTest(FILE, 'b', 1, { parallel: hooked })];

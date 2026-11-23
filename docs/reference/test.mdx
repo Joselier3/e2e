@@ -564,8 +564,8 @@ test.beforeAll(async ({ database, device }) => {
 ```
 
 The module is re-imported for every retry, serial group, and setup test, so
-`beforeAll` runs again in each. Tests in a [parallel](#parallel) scope run
-it one time on each worker that runs some of them.
+`beforeAll` runs again in each, and in each batch of a
+[parallel](#parallel) scope.
 
 It receives [worker fixtures](#worker-fixtures) only:
 
@@ -880,13 +880,16 @@ describe('reports', { parallel: true }, () => {
 - For a whole file, call [`describe.configure`](#describe-configure) at the
   top level. For every file, set
   [`fullyParallel`](/reference/config#fullyparallel).
-- The tests share no module state: each worker imports the file again.
+- Tests that run apart share no module state: each test, each batch of
+  tests with suite hooks, and each ordered group imports the file again.
 - A [serial](#serial) group inside a parallel scope still runs as one unit
   on one worker.
 - `false` keeps a group inside a parallel scope in order on one worker.
-- `beforeAll` and `afterAll` hooks around the tests run one time on each
-  worker that runs some of them. Tests with such hooks share workers: they
-  run in as many batches as the run has workers.
+- Tests with a `beforeAll` or `afterAll` hook around them run in batches,
+  as many as the target has workers, for each agent and repeat. Each batch
+  runs in order on one worker and runs the hooks one time, and again after
+  a failed test. A serial group or a `parallel: false` group runs the hooks
+  around it one time more.
 - A run with one worker, or a target whose engine serves one worker, runs
   the file in order.
 - The report lists the tests in declaration order.
