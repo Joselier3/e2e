@@ -9,6 +9,7 @@
  * rerun's reporters as `FinishedRun.lastRun`.
  */
 
+import { UNDELIVERED_SKIPS } from '../run/last-run.ts';
 import type { Report1Document as Report } from './build.ts';
 import { summarizeResults } from './summary.ts';
 
@@ -19,19 +20,9 @@ type ReportSerialGroup = ReportRun['serialGroups'][number];
 /** Statuses that count as a failure of the run. `--last-failed` also runs an interrupted test again, but that one reached no verdict. */
 const FAILED_STATUSES = new Set<ReportResult['status']>(['failed', 'timed-out']);
 
-/** Skips of a test the run meant to carry out and never reached, as opposed to one it chose not to run. */
-const UNREACHED_SKIPS = new Set<NonNullable<ReportResult['skip']>['cause']>([
-  'setup-failed',
-  'serial-predecessor-failed',
-  'hook-failed',
-  'infrastructure-unavailable',
-  'failure-limit',
-  'time-limit',
-]);
-
 /** Whether the run reached no verdict of its own for a result: it was interrupted, or skipped before it could run. */
 function unreached(result: ReportResult): boolean {
-  return result.status === 'interrupted' || (result.status === 'skipped' && result.skip !== undefined && UNREACHED_SKIPS.has(result.skip.cause));
+  return result.status === 'interrupted' || (result.status === 'skipped' && result.skip !== undefined && UNDELIVERED_SKIPS.has(result.skip.cause));
 }
 
 /**
@@ -49,23 +40,26 @@ function testKey(result: ReportResult): string {
  * repeats the rerun has no result of its own for. A pass after a failure
  * there, or after a run that was already flaky, is flaky. A rerun that never
  * reached the test (interrupted, or skipped by a failed setup, predecessor,
- * or hook, or a run limit) keeps the verdict it had, and the serial group its
- * attempts live on. A serial member's attempts live on its group, so its
- * result lists none, whatever it was before.
+ * or hook, or a run limit) keeps the verdict it had, failed, flaky, or
+ * passed, and the serial group its attempts live on; a kept verdict carries
+ * no skip. A serial member's attempts live on its group, so its result lists
+ * none, whatever it was before.
  */
 function foldRerun(current: ReportResult, history: readonly ReportResult[]): ReportResult {
   if (history.length === 0) return current;
   const before = history.toSorted((a, b) => a.repeat - b.repeat);
   const failure = before.findLast((result) => FAILED_STATUSES.has(result.status));
   const wasFlaky = before.some((result) => result.status === 'flaky');
-  const kept = failure?.status ?? (wasFlaky ? 'flaky' : undefined);
-  const status = current.status === 'passed' && kept !== undefined ? 'flaky' : unreached(current) && kept !== undefined ? kept : current.status;
+  const failedBefore = failure !== undefined || wasFlaky;
+  const kept = failure?.status ?? (wasFlaky ? 'flaky' : before.some((result) => result.status === 'passed') ? 'passed' : undefined);
+  const status = current.status === 'passed' && failedBefore ? 'flaky' : unreached(current) && kept !== undefined ? kept : current.status;
   const serialGroupId = current.serialGroupId ?? (unreached(current) ? before.findLast((result) => result.serialGroupId !== undefined)?.serialGroupId : undefined);
   const attempts =
     serialGroupId === undefined
       ? [...before.flatMap((result) => result.attempts), ...current.attempts].map((attempt, index) => ({ ...attempt, index }))
       : [];
-  return { ...current, status, attempts, ...(serialGroupId === undefined ? {} : { serialGroupId }) };
+  const { skip, ...row } = current;
+  return { ...row, status, attempts, ...(status === 'skipped' && skip !== undefined ? { skip } : {}), ...(serialGroupId === undefined ? {} : { serialGroupId }) };
 }
 
 /**
@@ -137,7 +131,8 @@ function runDuration(run: ReportRun): number {
  * the fold fails, since the suite is not known to pass. A carried test the
  * first pass interrupted reached no verdict: it leaves the outcome alone, and
  * the fold does not read as a pass. The first run's start time and shard
- * (or that it had none) are kept; the duration and usage are both runs'
+ * (or that it had none) are kept, and so is each row that run gave another
+ * shard, whatever the rerun ran; the duration and usage are both runs'
  * added up. The rerun takes the
  * run before's filter records and the change they judged, since the rows
  * those filters left out are the run before's too. `lastRun` may itself be a
@@ -169,6 +164,11 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
   const absorbed = new Map<string, Set<string>>();
   for (const result of current.run.results) {
     const previous = beforeById.get(result.id);
+    // The run that chose the tests gave this one to another shard; that shard's report has its result.
+    if (previous?.skip?.otherShard === true) {
+      results.push(previous);
+      continue;
+    }
     if (result.selected === false) {
       // A row the run before holds a result for has every attempt so far; a carried one only the last run's.
       const held = previous !== undefined && previous.selected !== false ? previous : undefined;

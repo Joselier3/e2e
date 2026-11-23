@@ -277,6 +277,32 @@ test('${title}', async ({ app }) => {
   );
 
   it(
+    'writes a valid whole run when a rerun stops before a test that failed earlier',
+    async () => {
+      const project = createProject({
+        'tests/a-first.e2e.ts': FAILING_TEST.replace('fails on purpose', 'always fails'),
+        'tests/b-second.e2e.ts': FAILING_TEST.replace('fails on purpose', 'failed before'),
+      });
+      try {
+        const config = engineConfig(createFakeEngine().engine, { workers: 1 });
+        await runExisting(project, { appUrl: FAKE_APP_URL, config });
+        // The first failure stops the rerun, so it never reaches the second test.
+        const stopped = await runExisting(project, { appUrl: FAKE_APP_URL, config, runOptions: { lastFailed: true, maxFailures: 1 } });
+        expect(resultByTitle(stopped, 'failed before').skip?.cause).toBe('failure-limit');
+        const whole = JSON.parse(readFileSync(path.join(project.dir, '.e2e', 'report-with-reruns.json'), 'utf8')) as RunOutcome['report'];
+        assertValidReport(whole);
+        expect(whole.run.results.map((result) => [result.titlePath.at(-1), result.status, result.skip])).toEqual([
+          ['always fails', 'failed', undefined],
+          ['failed before', 'failed', undefined],
+        ]);
+      } finally {
+        project.cleanup();
+      }
+    },
+    90_000,
+  );
+
+  it(
     "keeps the last run's report and artifacts when a run stops before its tests start",
     async () => {
       const project = createProject({

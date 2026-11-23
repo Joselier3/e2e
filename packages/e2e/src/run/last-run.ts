@@ -10,8 +10,12 @@ type ReportError = Report1Document['run']['errors'][number];
 type ReportSerialGroup = Report1Document['run']['serialGroups'][number];
 type ReportCarried = NonNullable<Report1Document['run']['carried']>;
 
-/** Skips that stand for a test the run could not carry out, as opposed to one it chose not to. */
-const UNDELIVERED_SKIPS = new Set<NonNullable<ReportResult['skip']>['cause']>([
+/**
+ * Skips that stand for a test the run could not carry out, as opposed to one
+ * it chose not to: what `--last-failed` runs again, and what a fold of a
+ * rerun reads as no verdict of its own.
+ */
+export const UNDELIVERED_SKIPS: ReadonlySet<NonNullable<ReportResult['skip']>['cause']> = new Set<NonNullable<ReportResult['skip']>['cause']>([
   'setup-failed',
   'serial-predecessor-failed',
   'hook-failed',

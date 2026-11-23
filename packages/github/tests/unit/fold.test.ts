@@ -489,4 +489,41 @@ describe('foldLastRun', () => {
       maxModelCallsInStep: 5, maxActionStepsInStep: 5, modelCachedTokens: 2, estimatedCostUsd: 0.25,
     });
   });
+
+  it('keeps no skip on a row whose kept verdict is not skipped, and keeps an earlier pass of a test the rerun never reached', () => {
+    const limit = { cause: 'failure-limit' as const, reason: 'the run stopped at --max-failures 1' };
+    const before = report({
+      status: 'failed',
+      results: [result({ title: 'broken', status: 'failed', attempts: [failedAttempt] }), result({ title: 'steady', status: 'passed', attempts: [attempt()] })],
+    });
+    const stopped = report({
+      status: 'failed',
+      results: [result({ title: 'broken', status: 'skipped', skip: limit }), result({ title: 'steady', status: 'skipped', skip: limit })],
+    });
+    const folded = foldLastRun(stopped, before);
+    expect(folded.run.results.map((entry) => [entry.titlePath[0], entry.status, entry.skip])).toEqual([
+      ['broken', 'failed', undefined],
+      ['steady', 'passed', undefined],
+    ]);
+    // A row the rerun did reach and skip keeps its skip.
+    const parked = report({ results: [result({ title: 'steady', status: 'skipped', skip: { cause: 'explicit', reason: 'later' } })] });
+    expect(foldLastRun(parked, before).run.results.find((entry) => entry.titlePath[0] === 'steady')?.skip).toEqual({ cause: 'explicit', reason: 'later' });
+  });
+
+  it('keeps a row the first run gave another shard as it was, whatever the rerun ran', () => {
+    const otherShards = { cause: 'filtered' as const, reason: 'outside the shard', otherShard: true as const };
+    const shard = report({
+      status: 'failed',
+      results: [result({ title: 'theirs', status: 'skipped', selected: false, skip: otherShards }), result({ title: 'ours', status: 'failed', attempts: [failedAttempt] })],
+    });
+    const sharded = { ...shard, run: { ...shard.run, shard: { index: 2, total: 2 } } };
+    // A failed setup widened the rerun to every consumer, the other shard's too.
+    const widened = report({ results: [result({ title: 'theirs', status: 'passed', attempts: [attempt()] }), result({ title: 'ours', status: 'passed', attempts: [attempt()] })] });
+    const folded = foldLastRun(widened, sharded);
+    expect(folded.run.results.map((entry) => [entry.titlePath[0], entry.selected, entry.status, entry.skip?.otherShard])).toEqual([
+      ['theirs', false, 'skipped', true],
+      ['ours', true, 'flaky', undefined],
+    ]);
+    expect(folded.run.summary).toMatchObject({ selected: 1, flaky: 1, passed: 0 });
+  });
 });
