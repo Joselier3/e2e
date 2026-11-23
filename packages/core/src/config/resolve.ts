@@ -13,7 +13,7 @@ import { isStepExecutor } from '../agent/executor.ts';
 import { compileGlob, compileGlobList, literalPrefix } from '../internal/globs.ts';
 import { isPlainObject, rejectUnknownKeys } from '../internal/options.ts';
 import { isRecord } from './command.ts';
-import { boundedInt, checkIntervals, DEFAULT_PASS_OPTIONS, describeValue, timerMs } from './validate.ts';
+import { boundedInt, checkIntervals, DEFAULT_PASS_OPTIONS, describeValue, optionalBoolean, timerMs } from './validate.ts';
 import type { ArtifactStore, ArtifactsConfig, CacheMode, ModelInstance, PassOptions, SecretProvider, SecretPurpose, RecordingMode, CacheStore, ProjectConfig } from '../types.ts';
 import { isModelInstance, resolveAgentConfig, runLimits, type ResolvedAgentConfig, type ResolvedLimits } from './agent.ts';
 import { bindTargets, digestTargets, resolveTargets, TARGET_NAME_PATTERN, type PortAssignments, type ResolvedTarget } from './targets.ts';
@@ -142,15 +142,6 @@ export interface CliOverrides {
   video?: RecordingMode;
   /** `--agent`: the configured agents unpinned tests run as, instead of `default` alone. */
   agents?: readonly string[];
-}
-
-/** A present value that is not a boolean is a config error naming the key. */
-function optionalBoolean(value: unknown, label: string): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'boolean') {
-    throw new ConfigurationError('INVALID_CONFIG', `${label} must be a boolean, got ${describeValue(value)}`);
-  }
-  return value;
 }
 
 const TOP_LEVEL_KEYS = new Set([
@@ -1025,9 +1016,9 @@ function computeConfigDigest(
   // `failOnSkippedFailure` decides only the exit code, never what runs, and
   // `maxDuration` only when the run stops. `fullyParallel`, at the top or on
   // a target, decides which worker runs a test, never what the test does.
-  // A test filter decides what runs
-  // before any worker starts and never changes what a test does, so adding
-  // one leaves the replays valid, like a reporter.
+  // A test filter decides what runs before any worker starts and never
+  // changes what a test does, so adding one leaves the replays valid, like
+  // a reporter.
   // `targets` digest by declaration below and never enter the clone: an
   // engine holds `secrets.get()` handles, which refuse to serialize.
   const {

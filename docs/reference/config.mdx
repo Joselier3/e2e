@@ -278,8 +278,8 @@ fullyParallel: true, // default: false
   That entry has the rules for hooks, serial groups, and `parallel: false`.
 - A target's `fullyParallel` wins over it. `--fully-parallel` wins over
   both.
-- It needs more than one worker. With [`workers: 1`](#workers), the default
-  in CI, a file's tests still run in order.
+- With one worker, the default in CI, tests still run one at a time. Set
+  [`workers`](#workers) above 1.
 
 #### `reporters`
 

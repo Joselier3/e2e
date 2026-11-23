@@ -49,8 +49,8 @@ export interface TargetWorkPlan {
 
 /**
  * Builds per-target work plans from a selection, preserving report order.
- * `workers` is the run's worker cap: a target that can run several workers
- * gets the tests of a parallel scope as units of their own.
+ * `workers` is the run's worker cap, which decides how many units the tests
+ * with suite hooks of a parallel scope share; see `splitFile`.
  */
 export function buildWorkPlans(
   selection: Selection,
@@ -59,7 +59,7 @@ export function buildWorkPlans(
   workers: number,
 ): TargetWorkPlan[] {
   return selection.perTarget.map(({ target, pairs }) => {
-    const parallelism = Math.min(workers, target.engine?.workers ?? workers);
+    const parallelism = targetWorkers(target, workers);
     // One pass sorts every pair into its bucket; files are then visited in
     // collection order so unit order (and thus report order) is stable.
     const setupUnits: WorkUnit[] = [];
@@ -121,9 +121,8 @@ function unitsOfFile(
 /**
  * The plan for a target whose engine's `prepare` reported `workers`, fewer
  * than the plan was cut for: each file is cut again for that many, so its
- * tests do not import the file and run its suite hooks more often than the
- * workers there are can use. A file keeps the place of its first unit in
- * the dispatch order.
+ * tests do not run its suite hooks more often than the workers there are
+ * can use. The caller orders the plan again.
  */
 export function withWorkerCap(plan: TargetWorkPlan, workers: number): TargetWorkPlan {
   const byFile = new Map<string, WorkUnit[]>();
@@ -152,10 +151,11 @@ export function withWorkerCap(plan: TargetWorkPlan, workers: number): TargetWork
  *   workers busy, since each unit runs the hooks again; an agent's or a
  *   repeat's pairs never share a unit with another's.
  *
- * With one worker nothing can run at the same time, so the file stays whole.
+ * The cut is the same whatever `parallelism` is, but for how many units the
+ * pairs with hooks share: a test that runs apart from another does so on
+ * one worker too, so a file never passes for sharing state there.
  */
 function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, parallelism: number): TestTargetPair[][] {
-  if (parallelism <= 1) return [[...pairs]];
   const inOrder: TestTargetPair[] = [];
   const scopes = new Map<string, TestTargetPair[]>();
   const alone: TestTargetPair[][] = [];
@@ -185,7 +185,7 @@ function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, par
 }
 
 /** What `orderWorkPlans` ranks the work by. */
-interface WorkOrder {
+export interface WorkOrder {
   /** How likely the test filters rated a test to fail on this change, from 0 to 1; 0 for a test none scored. */
   readonly relevanceOf: (testId: string) => number;
   /** How long the previous run spent in a target's file; `undefined` when it has no timing, as every file does when the run reads none. */
@@ -202,15 +202,14 @@ export function relevanceBand(score: number): number {
 
 /**
  * Orders each plan's file units, and the plans, so the work likeliest to fail
- * starts first and long files start early. A file ranks by the highest
+ * starts first and long units start early. A unit ranks by the highest
  * relevance band of the tests it runs, and within a band longest first by
- * the time the previous run spent in it, so a long file starts while short
- * ones fill the other workers instead of starting last and running alone.
- * A unit that holds part of a file counts that part of the file's time, by
- * its share of the pairs.
- * Files without a timing go first, being of unknown length; ties keep
- * collection order. A target ranks by its best file, ties keeping config
- * order. Report order does not depend on dispatch order.
+ * the time the previous run spent in its file, counted by the unit's share
+ * of the file's pairs, so a long unit starts while short ones fill the other
+ * workers instead of starting last and running alone. Units of a file
+ * without a timing go first, being of unknown length; ties keep collection
+ * order. A target ranks by its best unit, ties keeping config order. Report
+ * order does not depend on dispatch order.
  */
 export function orderWorkPlans(plans: readonly TargetWorkPlan[], { relevanceOf, durationOf }: WorkOrder): TargetWorkPlan[] {
   const ranked = plans.map((plan) => {
@@ -238,7 +237,12 @@ export function orderWorkPlans(plans: readonly TargetWorkPlan[], { relevanceOf, 
  */
 export function plannedSlots(plan: TargetWorkPlan, runWorkers: number): number {
   const units = plan.setupUnits.length + plan.fileUnits.length;
-  return Math.min(runWorkers, plan.target.engine?.workers ?? runWorkers, units);
+  return Math.min(targetWorkers(plan.target, runWorkers), units);
+}
+
+/** The workers a target can have at once: the run's worker cap, or the fewer its engine declares. */
+function targetWorkers(target: ResolvedTarget, runWorkers: number): number {
+  return Math.min(runWorkers, target.engine?.workers ?? runWorkers);
 }
 
 /** Skip info for a pair whose session-producing setup did not pass. */

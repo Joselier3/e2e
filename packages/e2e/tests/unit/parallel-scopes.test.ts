@@ -152,6 +152,14 @@ describe('parallel scopes', () => {
     );
   });
 
+  it('rejects a describe.configure call once the file has registered', async () => {
+    let late: (() => void) | undefined;
+    await collectModule(async () => {
+      late = () => test.describe.configure({ parallel: true });
+    });
+    expect(late).toThrow(/can only be called while a test module is being collected/);
+  });
+
   it('rejects a second parallel for one scope', async () => {
     await expect(
       collectModule(async () => {
@@ -169,6 +177,8 @@ describe('parallel scopes', () => {
       'describe options: parallel must be true or false, got "yes"',
     );
     await expect(collectModule(async () => test.describe.configure({ retries: 2 } as never))).rejects.toThrow(/unknown key "retries"/);
+    await expect(collectModule(async () => test.describe.configure(null as never))).rejects.toThrow(/takes an options object/);
+    await expect(collectModule(async () => void test('x', { parallel: true } as never, noop))).rejects.toThrow(/test options has unknown key "parallel"/);
     await expect(collectModule(async () => test.describe.configure({ mode: 'parallel' } as never))).rejects.toThrow(/takes no mode: use \{ parallel: true \}/);
   });
 });

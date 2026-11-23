@@ -2,6 +2,7 @@
 
 import { describeValue } from '@e2e-dev/core/lib/config/validate';
 import { CollectionError } from '@e2e-dev/core/lib/internal/errors';
+import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { GroupNode, ModuleRegistration } from './registry.ts';
 
 /**
@@ -16,6 +17,25 @@ export function checkParallel(api: string, value: unknown, serial: boolean): ass
   if (serial) {
     throw new CollectionError(`${api}: parallel cannot be set on a serial group, which runs as one unit on one worker`);
   }
+}
+
+/**
+ * The `parallel` a `describe.configure()` call sets on its scope, which has
+ * `current` so far and is a serial group or not; undefined when the call
+ * sets none.
+ */
+export function configuredParallel(options: unknown, current: boolean | undefined, serial: boolean): boolean | undefined {
+  const api = 'describe.configure()';
+  if (typeof options !== 'object' || options === null) throw new CollectionError(`${api} takes an options object, e.g. { parallel: true }`);
+  if ('mode' in options) {
+    throw new CollectionError(`${api} takes no mode: use { parallel: true } for 'parallel', { parallel: false } for 'default', and describe(title, { serial: true }, fn) for 'serial'`);
+  }
+  const unknown = unknownKeyMessage(api, options, ['parallel']);
+  if (unknown !== undefined) throw new CollectionError(unknown);
+  const { parallel } = options as { parallel?: unknown };
+  checkParallel(api, parallel, serial);
+  if (parallel !== undefined && current !== undefined) throw new CollectionError(`${api}: parallel is already set for this scope`);
+  return parallel;
 }
 
 /**

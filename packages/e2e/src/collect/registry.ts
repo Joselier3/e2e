@@ -18,7 +18,7 @@ import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
 import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
-import { checkParallel, checkParallelNesting } from './parallel.ts';
+import { checkParallel, checkParallelNesting, configuredParallel } from './parallel.ts';
 import type {
   DescribeAPI,
   DescribeConfigureOptions,
@@ -296,20 +296,12 @@ class Collector {
 
   /** Sets `parallel` on the scope being registered: the enclosing group, or the file. */
   configure(options: DescribeConfigureOptions): void {
-    const api = 'describe.configure()';
-    this.assertOpen(api);
-    if (typeof options !== 'object' || options === null) throw new CollectionError(`${api} takes an options object, e.g. { parallel: true }`);
-    if ('mode' in options) throw new CollectionError(`${api} takes no mode: use { parallel: true } for 'parallel', { parallel: false } for 'default', and describe(title, { serial: true }, fn) for 'serial'`);
-    const unknown = unknownKeyMessage(api, options, ['parallel']);
-    if (unknown !== undefined) throw new CollectionError(unknown);
+    this.assertOpen('describe.configure()');
     const scope = this.currentGroup;
-    if (options.parallel === undefined) return;
-    if ((scope === undefined ? this.fileParallel : scope.parallel) !== undefined) {
-      throw new CollectionError(`${api}: parallel is already set for this scope`);
-    }
-    checkParallel(api, options.parallel, scope?.serial === true);
-    if (scope === undefined) this.fileParallel = options.parallel;
-    else scope.parallel = options.parallel;
+    const parallel = configuredParallel(options, scope === undefined ? this.fileParallel : scope.parallel, scope?.serial === true);
+    if (parallel === undefined) return;
+    if (scope === undefined) this.fileParallel = parallel;
+    else scope.parallel = parallel;
   }
 
   registerHook(hook: HookDeclaration): void {

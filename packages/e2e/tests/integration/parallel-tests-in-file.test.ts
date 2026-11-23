@@ -223,12 +223,19 @@ test('t3', async () => { await together('t3', 3); });`,
   );
 
   it(
-    'runs a parallel file in order on one worker when the run has one worker',
+    'runs the tests of a parallel file one at a time on one worker, still apart, when the run has one worker',
     async () => {
-      const { outcome, marks, one } = await runFile(`test.describe.configure({ parallel: true });\n${FOUR_TESTS}`, { workers: 1 });
+      const { outcome, marks, named } = await runFile(
+        `test.describe.configure({ parallel: true });
+let ran = 0;
+${[1, 2, 3].map((n) => `test('t${n}', async () => { ran += 1; await mark('t${n}-ran-' + ran); });`).join('\n')}`,
+        { workers: 1 },
+      );
       expect(outcome.exitCode).toBe(0);
       expect(new Set(marks.map((mark) => mark.pid)).size).toBe(1);
-      expect(one('t1').end).toBeLessThanOrEqual(one('t2').start);
+      const [t1, t2, t3] = [1, 2, 3].map((n) => named(`t${n}-ran-1`)[0]);
+      expect(t1!.end).toBeLessThanOrEqual(t2!.start);
+      expect(t2!.end).toBeLessThanOrEqual(t3!.start);
     },
     120_000,
   );

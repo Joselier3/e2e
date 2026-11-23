@@ -817,8 +817,8 @@ export interface DescribeOptions extends Omit<TestOptions, 'only'> {
    * `true` lets the group's tests run at the same time on separate workers
    * instead of in order on one. `false` keeps a group inside a parallel
    * scope in order on one worker. Unset, the group runs as the scope around
-   * it does. `true` inside a serial group or a `parallel: false` group is a
-   * `COLLECTION_ERROR`.
+   * it does. A `COLLECTION_ERROR` on a serial group, and for `true` inside
+   * a serial group or inside a group or file with `parallel: false`.
    */
   parallel?: boolean;
 }

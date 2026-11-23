@@ -49,7 +49,7 @@ import { cleanupErrorsOf, someSkippedAfterFailure, tracedResultIds, type ResultR
 import { runUnits, type TargetFailure } from './scheduler.ts';
 import { pauseEvents, type BeforeStep } from './step-hold.ts';
 import { hostReporters } from './reporter-host.ts';
-import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, withWorkerCap, type TargetWorkPlan, type TimeLimit } from './units.ts';
+import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, withWorkerCap, type TargetWorkPlan, type TimeLimit, type WorkOrder } from './units.ts';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import type { RunnerOutput } from './process-output.ts';
@@ -1030,7 +1030,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const hasWork = plans.some((plan) => plan.setupUnits.length + plan.fileUnits.length > 0);
     // Starting long files early only pays when other workers take the rest, so only such a run reads the timings history.
     const previous = runWorkers > 1 ? await loadTimings(timingsPath(config), outputLayout(config.output).report) : undefined;
-    const order: Parameters<typeof orderWorkPlans>[1] = {
+    const order: WorkOrder = {
       relevanceOf: (testId) => relevance.get(testId) ?? 0,
       durationOf: (targetName, file) => previous?.get(fileDurationKey(targetName, file)),
     };

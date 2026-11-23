@@ -890,8 +890,8 @@ describe('reports', { parallel: true }, () => {
   runs in order on one worker and runs the hooks one time, and again after
   a failed test. A serial group or a `parallel: false` group runs the hooks
   around it one time more.
-- A run with one worker, or a target whose engine serves one worker, runs
-  the file in order.
+- With one worker the tests run one at a time, still apart: the file's
+  ordered tests first, then the rest.
 - The report lists the tests in declaration order.
 
 | Throws | When |
