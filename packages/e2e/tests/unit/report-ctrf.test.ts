@@ -95,6 +95,11 @@ describe('renderCtrfReport', () => {
     expect(test).toMatchObject({ name: 'tests/auth.e2e.ts > auth > signs in [web]', type: 'setup', labels: { agent: 'default', repeat: 0 } });
   });
 
+  it('counts suites from the tests the file lists, not from results the selection left out', () => {
+    const other = reportResult({ id: 'result-2', file: 'tests/other.e2e.ts', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: 'not selected' }, attempts: [] });
+    expect(render(doc({ results: [reportResult(), other] })).results.summary).toMatchObject({ tests: 1, suites: 1 });
+  });
+
   it('leaves a result the selection did not choose out, and keeps one a filter left out as skipped with the filter named', () => {
     const unselected = reportResult({ id: 'result-2', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: 'file not selected' }, attempts: [] });
     const filtered = reportResult({ id: 'result-3', selected: false, status: 'skipped', skip: { cause: 'filtered', reason: '4% likely affected', filter: 'jev' }, attempts: [] });
@@ -323,7 +328,7 @@ describe('renderCtrfReport', () => {
       const redact = (text: string): string => text.replaceAll(S, '<secret:probe>');
       const step = reportStep({ api: `api.${S}`, label: `label ${S}`, actor: `actor-${S}`, explanation: `why ${S}`, status: 'failed', error: reportError({ code: `CODE_${S}`, message: `step ${S}` }) });
       const failed = reportResult({
-        id: 'result-1',
+        id: `result-${S}`,
         file: `tests/${S}.e2e.ts`,
         titlePath: [`describe ${S}`, `as ${S}`],
         tags: [S],
@@ -332,7 +337,7 @@ describe('renderCtrfReport', () => {
         agent: `agent-${S}`,
         status: 'flaky',
         attempts: [
-          reportAttempt({ id: `attempt-${S}`, status: 'failed', steps: [step], error: reportError({ code: `CODE_${S}`, message: `saw ${S}` }), artifacts: [artifact(`shot-${S}`, { url: 'https://store.example/plain' }), artifact('hosted', { url: `https://store.example/${S}` }), artifact('shot-local')] }),
+          reportAttempt({ id: `attempt-${S}`, status: 'failed', steps: [step], error: reportError({ code: `CODE_${S}`, message: `saw ${S}` }), artifacts: [artifact(`shot-${S}`, { url: 'https://store.example/plain', mediaType: `image/${S}` }), artifact('hosted', { url: `https://store.example/${S}` }), artifact('shot-local')] }),
           reportAttempt({ id: 'attempt-2', index: 1, expectedFailure: { reason: `known ${S}`, error: reportError({ code: `CODE_${S}`, message: `still ${S}` }) } }),
         ],
       });
@@ -351,9 +356,8 @@ describe('renderCtrfReport', () => {
       );
       const text = JSON.stringify(document);
       expect(text).not.toContain(S);
-      // Every planted text came through, as its marker: none was dropped to pass.
       // One marker per planted text that reaches the file: a field that skipped the redaction changes the count.
-      expect(text.split('<secret:probe>').length - 1).toBe(40);
+      expect(text.split('<secret:probe>').length - 1).toBe(42);
       const brokenTest = (document.results.tests as Json[]).find((test) => test.testId === 'result-4')!;
       expect(brokenTest).toMatchObject({
         message: 'failed <secret:probe>',
@@ -495,6 +499,15 @@ describe('renderCtrfReport', () => {
       const [, pays] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['failed', 'failed']) }));
       expect(pays).toMatchObject({ status: 'failed', attemptId: 'test-2-member', message: 'card declined' });
       expect(pays).not.toHaveProperty('extra');
+    });
+
+    it('counts a member flaky from its own records in a group that failed', () => {
+      const first = groupAttempt('group-attempt-1', [member('test-1', { status: 'failed', error: reportError() }), member('test-2', { status: 'skipped', durationMs: 0, skip: { cause: 'serial-predecessor-failed', reason: 'earlier failed' } })], { status: 'failed' });
+      const second = groupAttempt('group-attempt-2', [member('test-1', { id: 'test-1-member-2' }), member('test-2', { id: 'test-2-member-2', status: 'failed', error: reportError() })], { index: 1, status: 'failed' });
+      const serial = group([first, second], 'failed');
+      const document = render(doc({ serialGroups: [serial], results: memberResults(serial, ['passed', 'failed']) }));
+      expect(document.results.tests[0]).toMatchObject({ status: 'passed', rawStatus: 'passed', flaky: true });
+      expect(document.results.summary).toMatchObject({ flaky: 1 });
     });
 
     it('counts a member flaky when an earlier attempt of its own timed out', () => {
