@@ -886,12 +886,12 @@ describe('reports', { parallel: true }, () => {
   on one worker.
 - `false` keeps a group inside a parallel scope in order on one worker.
 - Tests with a `beforeAll` or `afterAll` hook around them run in batches,
-  as many as the target has workers, for each agent and repeat. Each batch
+  at most as many as the target has workers, for each agent and repeat. Each batch
   runs in order on one worker and runs the hooks one time, and again after
   a failed test. A serial group or a `parallel: false` group runs the hooks
   around it one time more.
-- With one worker the tests run one at a time, still apart: the file's
-  ordered tests first, then the rest.
+- With one worker the tests run one at a time, still apart, and not always
+  in declaration order.
 - The report lists the tests in declaration order.
 
 | Throws | When |
@@ -1074,7 +1074,8 @@ export const test = base.extend<{}, { database: Database }>({
   device: it runs in a short engine attempt when the fixture names one of
   them, and without one when it names none.
 - A worker keeps one instance per definition. A test file is imported again
-  after a failed test and for each serial group and setup test, so a worker
+  after a failed test, for each serial group and setup test, and for tests
+  that run apart in a [parallel](#parallel) scope, so a worker
   fixture the file declares gets a new instance each time, and the old one
   stays set up until the worker ends.
   Declare worker fixtures in a module the file imports.

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { assertValidReport } from '../helpers/report-schema.ts';
-import { resultByTitle, runProjectWithConfigFile, workerFakeConfigSource, type RunOptions } from '../helpers/run-project.ts';
+import { resultByTitle, runProject, runProjectWithConfigFile, workerFakeConfigSource, type RunOptions } from '../helpers/run-project.ts';
 
 /** What one test body or hook wrote down: where it ran, and when. */
 interface Mark {
@@ -218,6 +218,29 @@ test('t3', async () => { await together('t3', 3); });`,
       expect(named('fails')).toHaveLength(2);
       const failing = new Set(named('fails').map((mark) => mark.pid));
       expect(failing.has(one('t1').pid) || failing.has(one('t3').pid)).toBe(false);
+    },
+    120_000,
+  );
+
+  it(
+    'runs the tests of a parallel file apart in a run without worker processes',
+    async () => {
+      const { outcome, project } = await runProject(
+        {
+          'tests/file.e2e.ts': `import { expect, test } from 'e2e';
+test.describe.configure({ parallel: true });
+let ran = 0;
+for (const title of ['t1', 't2', 't3']) test(title, async () => { ran += 1; expect(ran).toBe(1); });
+test.describe('ordered', { parallel: false }, () => {
+  test('first', async () => { ran += 1; });
+  test('second', async () => { expect(ran).toBe(1); });
+});`,
+        },
+        {},
+      );
+      project.cleanup();
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.results.map((result) => result.status)).toEqual(['passed', 'passed', 'passed', 'passed', 'passed']);
     },
     120_000,
   );

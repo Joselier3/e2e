@@ -50,13 +50,16 @@ export interface TargetWorkPlan {
 /**
  * Builds per-target work plans from a selection, preserving report order.
  * `workers` is the run's worker cap, which decides how many units the tests
- * with suite hooks of a parallel scope share; see `splitFile`.
+ * with suite hooks of a parallel scope share; see `splitFile`. `inMemoryFile`
+ * names the file of tests registered in memory, which stays one unit: there
+ * is no module to import again for a second.
  */
 export function buildWorkPlans(
   selection: Selection,
   collection: Collection,
   projectRoot: string,
   workers: number,
+  inMemoryFile?: string,
 ): TargetWorkPlan[] {
   return selection.perTarget.map(({ target, pairs }) => {
     const parallelism = targetWorkers(target, workers);
@@ -90,7 +93,7 @@ export function buildWorkPlans(
     for (const file of collection.files) {
       const filePairs = runnableByFile.get(file.file);
       if (filePairs === undefined) continue;
-      fileUnits.push(...unitsOfFile(target, file, filePairs, parallelism));
+      fileUnits.push(...unitsOfFile(target, file, filePairs, parallelism, file.file === inMemoryFile));
     }
 
     return { target, setupUnits, fileUnits, immediate };
@@ -103,10 +106,11 @@ function unitsOfFile(
   file: Pick<WorkUnit, 'file' | 'absolutePath'>,
   pairs: readonly TestTargetPair[],
   parallelism: number,
+  whole = false,
 ): WorkUnit[] {
   const ordered = pairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
   const id = `file::${target.name}::${file.file}`;
-  return splitFile(ordered, target.fullyParallel, parallelism).map((unitPairs, index) => ({
+  return (whole ? [ordered] : splitFile(ordered, target.fullyParallel, parallelism)).map((unitPairs, index) => ({
     // A file that is one unit keeps the id it always had.
     id: index === 0 ? id : `${id}::${index}`,
     kind: 'file',

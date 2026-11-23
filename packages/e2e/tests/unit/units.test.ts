@@ -339,6 +339,14 @@ describe('buildWorkPlans with parallel scopes', () => {
     expect(ordered!.fileUnits.map((unit) => unit.pairs[0]!.test.title)).toEqual(['whole', 'part 0', 'part 1', 'part 2']);
   });
 
+  it('keeps the file of tests registered in memory whole, since nothing can import it again', () => {
+    const tests = [makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })];
+    const pairs = tests.map((test) => makePair(test));
+    const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4, FILE);
+    expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => pair.test.title))).toEqual([['one', 'two']]);
+  });
+
   it('cuts a file for one worker as for many, but for the tests with suite hooks, which share one unit', () => {
     const hooked = { declared: true, ordered: undefined, suiteHooks: true };
     const tests = [

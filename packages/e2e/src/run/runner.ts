@@ -1023,7 +1023,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const runWorkers = inProcess ? 1 : config.workers;
     // The work units, built once: the same plans tell each engine's `prepare`
     // how many worker slots to provision and the scheduler what to dispatch.
-    let plans = buildWorkPlans(selection, collection, config.projectRoot, runWorkers);
+    let plans = buildWorkPlans(selection, collection, config.projectRoot, runWorkers, options.tests?.file);
     // A run with nothing to run (the filters left nothing, or
     // --pass-with-no-tests on an empty selection) still reports, but
     // prepares no engine and starts no app.
