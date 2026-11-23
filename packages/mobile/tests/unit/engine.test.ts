@@ -18,6 +18,7 @@ import type { RawNode } from '../../src/nodes.ts';
 import { mobile } from '../../src/engine.ts';
 import { ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING } from '../../src/errors.ts';
 import { swipeWithin } from '../../src/support.ts';
+import { tvTools } from '../../src/tools.ts';
 import { ANDROID_APP_PACKAGE, ANDROID_ID_SNAPSHOT, SETTINGS_NODES, SETTINGS_SNAPSHOT } from '../helpers/fake-client.ts';
 import { boot, harness, poolVariableIn, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
@@ -1108,7 +1109,6 @@ describe('observation', () => {
     ['tap at point', 'interactions.press', (h, op) => h.engine.performAt!({ x: 10, y: 10 }, { kind: 'tap' }, op)],
     ['type', 'interactions.type', (h, op) => h.engine.keyboard!.type('hi', { replace: false }, op)],
     ['press', 'command.keyboard', (h, op) => h.engine.keyboard!.press('Enter', op)],
-    ['remote key', 'command.tvRemote', (h, op) => h.engine.keyboard!.press('menu', op)],
     ['keyboard dismiss', 'command.keyboard', (h, op) => h.engine.keyboard!.dismiss!(op)],
     ['back', 'command.back', (h, op) => h.engine.session!.back!(op)],
     ['open link', 'apps.open', (h, op) => h.engine.session!.openLink!('e2e-benchmark://orders/42', op)],
@@ -1554,67 +1554,6 @@ describe('perform', () => {
     expect(h.fake.calls.slice(before).map((call) => call.method)).toEqual([key === 'Enter' ? 'command.keyboard' : 'interactions.type']);
   });
 
-  it.each([
-    ['up', 'up'],
-    ['down', 'down'],
-    ['left', 'left'],
-    ['right', 'right'],
-    ['select', 'select'],
-    ['back', 'back'],
-    ['menu', 'menu'],
-    ['home', 'home'],
-    ['play', 'media-play'],
-    ['pause', 'media-pause'],
-    ['play-pause', 'media-play-pause'],
-    ['stop', 'media-stop'],
-    ['rewind', 'media-rewind'],
-    ['fast-forward', 'media-fast-forward'],
-    ['next', 'media-next'],
-    ['previous', 'media-previous'],
-  ])('presses the %s remote key as the agent-device tv-remote button %s', async (key, button) => {
-    const h = harness();
-    await openAttempt(h);
-    const before = h.fake.calls.length;
-    await h.engine.keyboard!.press(key, operation());
-    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.tvRemote', { platform: 'ios', button }]]);
-  });
-
-  it.each([
-    ['Home', 'On a TV, the remote\'s button is "home"'],
-    ['ArrowUp', 'On a TV, the remote\'s button is "up"'],
-    ['Escape', 'On a TV, the remote\'s button is "back"'],
-    ['Tab', 'On a TV, press a remote button by its lowercase name: up, down, left, right, select, back, menu, home, play'],
-    // Backspace deletes text; the remote's back leaves the screen, so it is not suggested.
-    ['Backspace', 'On a TV, press a remote button by its lowercase name: up, down, left, right, select, back, menu, home, play'],
-  ])('refuses the keyboard key %s and names the remote key to press instead', async (key, next) => {
-    const h = harness();
-    await openAttempt(h);
-    await expect(h.engine.keyboard!.press(key, operation())).rejects.toMatchObject({
-      code: 'UNSUPPORTED_CAPABILITY',
-      message: expect.stringContaining(next),
-    });
-    const about = await observed(h, 'About');
-    await expect(h.engine.perform!(about.ref, { kind: 'press', key }, operation())).rejects.toMatchObject({
-      code: 'UNSUPPORTED_CAPABILITY',
-      message: expect.stringContaining(next),
-    });
-  });
-
-  it('declares remoteKeys, so the harness hands it the remote keys', () => {
-    expect(harness().engine.remoteKeys).toBe(true);
-  });
-
-  it('fails a remote key the device has no button for with UNSUPPORTED_CAPABILITY', async () => {
-    const h = harness();
-    await openAttempt(h);
-    h.fake.respond('command.tvRemote', () => {
-      throw new AppError('UNSUPPORTED_OPERATION', 'tv-remote is not supported on this device');
-    });
-    await expect(h.engine.keyboard!.press('menu', operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
-    // The grammar refuses a key with this code too: the refusal has to be the device's.
-    expect(h.fake.methods()).toContain('command.tvRemote');
-  });
-
   it.each(['e2', ''])('presses the innermost control even when the row ref is %j', async (rowRef) => {
     const h = harness();
     h.fake.respond('capture.snapshot', () => ({
@@ -1885,19 +1824,47 @@ describe('device fixture', () => {
     return h.engine.fixtures!['device']!(context) as Device;
   }
 
-  it('presses a remote key with no node through device.pressRemote, and refuses a name outside the list', async () => {
+  it.each([
+    ['up', 'up'],
+    ['down', 'down'],
+    ['left', 'left'],
+    ['right', 'right'],
+    ['select', 'select'],
+    ['back', 'back'],
+    ['menu', 'menu'],
+    ['home', 'home'],
+    ['play', 'media-play'],
+    ['pause', 'media-pause'],
+    ['play-pause', 'media-play-pause'],
+    ['stop', 'media-stop'],
+    ['rewind', 'media-rewind'],
+    ['fast-forward', 'media-fast-forward'],
+    ['next', 'media-next'],
+    ['previous', 'media-previous'],
+  ] as const)('device.pressRemote(%j) presses the agent-device tv-remote button %s', async (key, button) => {
     const h = harness();
     await openAttempt(h);
-    const device = fixture(h);
     const before = h.fake.calls.length;
-    await device.pressRemote('play-pause');
-    await device.pressRemote('select');
-    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
-      ['command.tvRemote', { platform: 'ios', button: 'media-play-pause' }],
-      ['command.tvRemote', { platform: 'ios', button: 'select' }],
-    ]);
-    await expect(device.pressRemote('Menu' as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a remote key') });
-    expect(h.fake.calls).toHaveLength(before + 2);
+    await fixture(h).pressRemote(key);
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.tvRemote', { platform: 'ios', button }]]);
+  });
+
+  it.each(['Menu', 'Home', 'toString', '', 3])('device.pressRemote refuses %j, a name outside the list, before any device call', async (key) => {
+    const h = harness();
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await expect(fixture(h).pressRemote(key as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a remote key; press one of up, down, left, right, select, back, menu, home, play') });
+    expect(h.fake.calls).toHaveLength(before);
+  });
+
+  it('fails a remote key the device has no button for with UNSUPPORTED_CAPABILITY', async () => {
+    const h = harness();
+    await openAttempt(h);
+    h.fake.respond('command.tvRemote', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'tv-remote is not supported on this device');
+    });
+    await expect(fixture(h).pressRemote('menu')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(h.fake.methods()).toContain('command.tvRemote');
   });
 
   describe('viewport', () => {
@@ -2651,6 +2618,7 @@ describe('device fixture', () => {
       () => device.back(),
       () => device.home(),
       () => device.pressRemote('menu'),
+      () => (tvTools(h.engine).tv_remote!.tool.execute as (input: unknown, options: object) => Promise<unknown>)({ key: 'select' }, { toolCallId: 'c1', messages: [] }),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
       () => device.setOrientation('landscape-left'),
@@ -2988,7 +2956,6 @@ describe('device fixture', () => {
       () => selected.setPermission('camera', 'grant'),
       // A remote reaches the launcher, so a test presses it with no app open.
       () => selected.pressRemote('home'),
-      () => h.engine.keyboard!.press('menu', operation()),
       // iOS refuses going offline before any command, so the radios are Android's.
       ...(platform === 'ios' ? [
         () => selected.enrollBiometrics('touchid', true),

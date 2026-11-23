@@ -28,7 +28,6 @@ const KNOWN_KEYS = [
   'performAt',
   'pointerActions',
   'tapModifiers',
-  'remoteKeys',
   'selectsDevice',
   'keyboard',
   'fixtures',
@@ -279,12 +278,6 @@ export function defineEngine<Fixtures extends object = {}>(declared: EngineSpec<
       throw invalid(name, 'declares tapModifiers without perform: modifiers ride the tap actions perform receives');
     }
   }
-  if (spec.remoteKeys !== undefined) {
-    if (typeof spec.remoteKeys !== 'boolean') throw invalid(name, 'remoteKeys must be a boolean');
-    if (spec.remoteKeys && spec.keyboard === undefined) {
-      throw invalid(name, 'declares remoteKeys without keyboard: a remote key is pressed through keyboard.press');
-    }
-  }
   if (spec.selectsDevice !== undefined) {
     if (typeof spec.selectsDevice !== 'boolean') throw invalid(name, 'selectsDevice must be a boolean');
     if (spec.selectsDevice && spec.prepare === undefined) throw invalid(name, 'declares selectsDevice without prepare: prepare binds the device --device names');
@@ -309,7 +302,6 @@ export function defineEngine<Fixtures extends object = {}>(declared: EngineSpec<
   }
   if (spec.actions !== undefined) handle['actions'] = declaredKinds(name, 'actions', spec.actions, KNOWN_LOCATOR_ACTION_KINDS);
   if (spec.tapModifiers === true) handle['tapModifiers'] = true;
-  if (spec.remoteKeys === true) handle['remoteKeys'] = true;
   if (spec.selectsDevice === true) handle['selectsDevice'] = true;
   if (spec.isolation === 'worker') handle['isolation'] = 'worker';
   if (spec.pointerActions !== undefined) {

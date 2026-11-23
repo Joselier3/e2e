@@ -144,7 +144,6 @@ The tools, one per engine action. Name the target as the screen names it
 - `hover`: menus, flyouts, tooltips that open on the pointer.
 - `type`: one input; on browser/device no target means focus; `replace` clears.
 - `press`: one key to a node or, on browser/device, to focus; `times` up to 20.
-  A TV remote key (`menu`, `select`) goes to the remote even with a target.
 - `select`: one option by visible label.
 - `check`: set a checkbox, switch, or radio to a state, not flip it.
 - `scroll`: viewport or one scrollable node, a screen or a few.

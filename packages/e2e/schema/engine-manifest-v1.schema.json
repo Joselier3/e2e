@@ -118,10 +118,6 @@
     "tapModifiers": {
       "type": "boolean"
     },
-    "remoteKeys": {
-      "description": "Present as true when the engine presses TV remote keys, which reach it through keyboard/press.",
-      "type": "boolean"
-    },
     "selectsDevice": {
       "description": "prepare binds the device e2e run --device names.",
       "type": "boolean"
@@ -132,27 +128,6 @@
     }
   },
   "allOf": [
-    {
-      "if": {
-        "properties": {
-          "remoteKeys": {
-            "const": true
-          }
-        },
-        "required": [
-          "remoteKeys"
-        ]
-      },
-      "then": {
-        "properties": {
-          "methods": {
-            "contains": {
-              "const": "keyboard/press"
-            }
-          }
-        }
-      }
-    },
     {
       "if": {
         "properties": {

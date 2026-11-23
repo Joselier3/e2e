@@ -57,16 +57,6 @@ describe.each(schemas)('%s schema', (name) => {
       expect(validate(manifest)).toBe(false);
     });
 
-    it('accepts remoteKeys beside keyboard/press alone, and rejects it without', () => {
-      const manifest = readJson('fixtures', 'engine-manifest-v1.valid.json') as { methods: string[]; actions?: unknown };
-      const keyboard = manifest.methods.filter((method) => method !== 'engine/perform');
-      const { actions: _actions, ...withoutActions } = manifest;
-      expect(validate({ ...withoutActions, methods: keyboard })).toBe(true);
-      // Every keyboard method goes: `keyboard/dismiss` alone is refused by an older rule.
-      expect(validate({ ...manifest, methods: manifest.methods.filter((method) => !method.startsWith('keyboard/')) })).toBe(false);
-      expect(validate({ ...manifest, remoteKeys: 'true' })).toBe(false);
-    });
-
     it('rejects selectsDevice without lifecycle/prepare', () => {
       const manifest = readJson('fixtures', 'engine-manifest-v1.valid.json') as { methods: string[]; selectsDevice: boolean };
       expect(manifest.selectsDevice).toBe(true);

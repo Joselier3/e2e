@@ -1,9 +1,8 @@
-/** The key grammar's TV remote buttons, pressed through agent-device's `tv-remote`. */
+/** A TV's remote buttons, pressed through agent-device's `tv-remote`. */
 
-import { REMOTE_KEY_NAMES, TestError, isRemoteKey, type RemoteKeyName } from '@e2e-dev/core/engine';
+import { TestError } from '@e2e-dev/core/engine';
 import type { AgentDeviceClient } from './options.ts';
 import type { DeviceSelection } from './pool.ts';
-import type { InputBudget } from './support.ts';
 
 type TvRemoteButton = Parameters<AgentDeviceClient['command']['tvRemote']>[0]['button'];
 
@@ -33,18 +32,21 @@ const REMOTE_BUTTONS = {
   'fast-forward': 'media-fast-forward',
   next: 'media-next',
   previous: 'media-previous',
-} as const satisfies Record<RemoteKeyName, TvRemoteButton>;
+} as const satisfies Record<string, TvRemoteButton>;
 
-/** A TV remote key `device.pressRemote` takes: one of the key grammar's `REMOTE_KEY_NAMES`. */
-export type RemoteKey = RemoteKeyName;
+/** A TV remote key `device.pressRemote` takes. */
+export type RemoteKey = keyof typeof REMOTE_BUTTONS;
 
-/** Presses one remote button, within the operation's budget. A remote reaches the launcher too, so the press names its device. */
-export function pressRemote(client: AgentDeviceClient, key: RemoteKey, input: InputBudget, selection: DeviceSelection): Promise<unknown> {
-  return input.send(() => client.command.tvRemote({ ...selection, button: REMOTE_BUTTONS[key] }));
+/** Every remote key, in the order the docs and the agent tool list them. */
+export const REMOTE_KEYS = Object.keys(REMOTE_BUTTONS) as [RemoteKey, ...RemoteKey[]];
+
+/** Presses one remote button. A remote reaches the launcher too, so the press names its device. */
+export function pressRemote(client: AgentDeviceClient, key: RemoteKey, selection: DeviceSelection): Promise<unknown> {
+  return client.command.tvRemote({ ...selection, button: REMOTE_BUTTONS[key] });
 }
 
 /** Throws `INVALID_ARGUMENT` unless `key` is one of the remote keys. */
 export function requireRemoteKey(key: unknown): asserts key is RemoteKey {
-  if (typeof key === 'string' && isRemoteKey(key)) return;
-  throw new TestError('INVALID_ARGUMENT', `device.pressRemote(${JSON.stringify(key)}): not a remote key; press one of ${REMOTE_KEY_NAMES.join(', ')}`);
+  if (typeof key === 'string' && Object.hasOwn(REMOTE_BUTTONS, key)) return;
+  throw new TestError('INVALID_ARGUMENT', `device.pressRemote(${JSON.stringify(key)}): not a remote key; press one of ${REMOTE_KEYS.join(', ')}`);
 }

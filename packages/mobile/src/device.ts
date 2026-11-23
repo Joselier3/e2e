@@ -194,13 +194,12 @@ export interface Device {
   /** Navigates back once (in-app back). */
   back(): Promise<void>;
   /**
-   * Presses one TV remote button (`'menu'`, `'play-pause'`, the D-pad's
-   * `'up'` or `'select'`; the list is `REMOTE_KEY_NAMES`) on the device, with
-   * no node to address: what `locator.press(key)` does on any node. Android
-   * TV takes every button and an Apple TV the D-pad, `back`, `menu`, and
-   * `home`, where `back` and `menu` are the same Siri Remote button; any
-   * other button or device is `UNSUPPORTED_CAPABILITY`. A name
-   * outside the list is `INVALID_ARGUMENT`.
+   * Presses one TV remote button: the D-pad's `'up'`, `'down'`, `'left'`,
+   * `'right'`, and `'select'`, `'back'`, `'menu'`, `'home'`, and the media
+   * keys such as `'play-pause'`. Android TV takes every button and an Apple
+   * TV the D-pad, `back`, `menu`, and `home`, where `back` and `menu` are the
+   * same Siri Remote button; any other button or device is
+   * `UNSUPPORTED_CAPABILITY`. A name outside the list is `INVALID_ARGUMENT`.
    */
   pressRemote(key: RemoteKey): Promise<void>;
   /** Accepts or dismisses the visible system alert. */
@@ -390,7 +389,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async pressRemote(key) {
       requireRemoteKey(key);
       const input = surface.inputBudget('device.pressRemote', { timeoutMs: context.timeouts.action, signal: context.signal });
-      await surface.screenCommand('device.pressRemote', (client) => pressRemote(client, key, input, surface.selection()), context.signal);
+      await surface.screenCommand('device.pressRemote', (client) => input.send(() => pressRemote(client, key, surface.selection())), context.signal);
     },
     async alert(action) {
       await surface.screenCommand('device.alert', (client) => client.command.alert({ ...surface.selection(), action }), context.signal);

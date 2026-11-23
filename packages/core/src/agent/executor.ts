@@ -216,7 +216,6 @@ export interface ExecutorActions {
    * or any model.
    */
   typeSecret(target: ExecutorTarget, name: string): Promise<void>;
-  /** Sends one key to a node. A TV remote button has no node, so it is pressed and recorded as `pressKey`. */
   press(target: ExecutorTarget, key: string): Promise<void>;
   select(target: ExecutorTarget, value: string): Promise<void>;
   /**
@@ -315,16 +314,7 @@ export interface ExecutorActions {
    * Needs the engine's `keyboard` capability (`typeText` in `target.verbs`).
    */
   typeText(value: string, options?: { readonly replace?: boolean }): Promise<void>;
-  /**
-   * Sends one key to whatever holds focus (`pressKey` in `target.verbs`), in
-   * the contract's key grammar: a TV remote button such as `menu` goes to
-   * the device's remote. A key outside the grammar rejects with
-   * `INVALID_ARGUMENT`. A TV remote button on an engine that does not declare
-   * `remoteKeys` rejects with `UNSUPPORTED_CAPABILITY`; one the device lacks
-   * (a phone, or an Apple TV's media keys) rejects with `POLICY_DENIED`, the
-   * device's `UNSUPPORTED_CAPABILITY` as its `cause`. Catch either here to
-   * fall back: one left to escape `runStep` fails the step.
-   */
+  /** Sends one key to whatever holds focus (`pressKey` in `target.verbs`). */
   pressKey(key: string): Promise<void>;
   /** Hides an on-screen keyboard (`dismissKeyboard` in `target.verbs`). */
   dismissKeyboard(): Promise<void>;
@@ -474,16 +464,13 @@ export interface StepExecutorContext {
    * `verbs` is the subset of the action grammar the engine declared, so an
    * executor offers a model exactly the vocabulary the surface can honor.
    * `tapModifiers` is true when `tap`, `doubleTap`, and `secondaryTap` accept
-   * `modifiers`. `remoteKeys` is true when the engine sends the TV remote
-   * keys (`REMOTE_KEY_NAMES`) to the device. A device without the button
-   * still refuses it, for example a phone.
+   * `modifiers`.
    */
   readonly target: {
     readonly name: string;
     readonly platform: string;
     readonly verbs: ReadonlySet<ExecutorVerb>;
     readonly tapModifiers: boolean;
-    readonly remoteKeys: boolean;
   };
   /**
    * Present when a cached replay ran part of this step before handing it
