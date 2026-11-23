@@ -1222,6 +1222,8 @@ test('request', async ({ request }) => {
   const created = await request.post('/api/orders', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
   void (created satisfies APIResponse);
   void (created.status satisfies number);
+  // @ts-expect-error json() is unknown unless the caller names a type
+  void (await created.json()).id;
   void ((await created.json<{ id: number }>()).id satisfies number);
   void (expect(await created.json()).toMatchSchema(userSchema) satisfies { id: number });
   expect(created).toBeOK();

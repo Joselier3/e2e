@@ -162,10 +162,10 @@ function apiResponse(response: Response, body: Uint8Array, label: string): APIRe
     ok: response.ok,
     headers,
     text: () => Promise.resolve(text()),
-    json: <T = unknown>() => Promise.resolve().then(() => JSON.parse(text()) as T),
+    // oxlint-disable-next-line e2e/no-unchecked-json -- public API: the caller names T, unknown by default
+    json: async <T = unknown>() => JSON.parse(text()) as T,
   };
-  Object.defineProperty(result, expectationBrand, { enumerable: false, value: responseExpectation(result, label) });
-  return result as unknown as APIResponse;
+  return Object.defineProperty(result, expectationBrand, { enumerable: false, value: responseExpectation(result, label) }) as APIResponse;
 }
 
 /** `expect(response)`: `toBeOK()` and its negation. */

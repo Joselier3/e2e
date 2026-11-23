@@ -793,7 +793,7 @@ export interface APIResponse extends Expectable<APIResponseExpectation> {
   readonly headers: Readonly<Record<string, string>>;
   /** The body as UTF-8 text. */
   text(): Promise<string>;
-  /** The body parsed as JSON. */
+  /** The body parsed as JSON; `T` is not checked, so check it with `toMatchSchema`. */
   json<T = unknown>(): Promise<T>;
 }
 

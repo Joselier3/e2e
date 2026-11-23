@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { defineEngine } from '@e2e-dev/core/lib/engine/index';
 import type { E2EConfig } from '../../src/index.ts';
 import { createFakeEngine } from '../helpers/fake-engine.ts';
+import { freePort } from '../helpers/free-port.ts';
 import { hookLog, LOG_MODULE } from '../helpers/hook-log.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import { resultByTitle, runProject } from '../helpers/run-project.ts';
@@ -159,6 +160,10 @@ test('relative', async ({ request }) => {
 test('another scheme', async ({ request }) => {
   await request.get('file:///etc/hosts');
 });
+
+test('a blank page', async ({ request }) => {
+  await request.get('about:blank');
+});
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: { targets: [{ name: 'api', platform: 'api' }] } });
     const absolute = resultByTitle(outcome, 'absolute');
@@ -169,6 +174,51 @@ test('another scheme', async ({ request }) => {
       message: expect.stringContaining('request to "/api/ok" needs an app URL'),
     });
     expect(resultByTitle(outcome, 'another scheme').attempts[0]!.error?.code).toBe('POLICY_DENIED');
+    expect(resultByTitle(outcome, 'a blank page').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: forbidden URL scheme: about:' });
+  });
+
+  it('refuses a malformed call before sending it, and names a network failure', async () => {
+    const closed = await freePort();
+    const file = `import { test } from 'e2e';
+
+test('a GET with a body', async ({ request }) => {
+  await request.get('/api/ok', { json: { a: 1 } });
+});
+
+test('json and body', async ({ request }) => {
+  await request.post('/api/orders', { json: { a: 1 }, body: 'x' });
+});
+
+test('a method with a space', async ({ request }) => {
+  await request.fetch('/api/ok', { method: 'GET X' });
+});
+
+test('a refused connection', async ({ request }) => {
+  await request.get('http://127.0.0.1:${closed}/api/ok');
+});
+`;
+    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    const errorOf = (title: string) => resultByTitle(outcome, title).attempts[0]!.error;
+    expect(errorOf('a GET with a body')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: a GET request takes no body' });
+    expect(errorOf('json and body')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: pass json or body, not both' });
+    expect(errorOf('a method with a space')?.code).toBe('INVALID_ARGUMENT');
+    expect(errorOf('a refused connection')).toMatchObject({
+      code: 'ACTION_FAILED',
+      message: expect.stringContaining(`GET http://127.0.0.1:${closed}/api/ok failed: connect ECONNREFUSED`),
+    });
+  });
+
+  it('is a test fixture, which a beforeAll hook cannot name', async () => {
+    const file = `import { test } from 'e2e';
+
+test.beforeAll(async ({ request }) => {
+  await request.get('/api/ok');
+});
+
+test('runs', async () => {});
+`;
+    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    expect(outcome.report.run.errors).toEqual([expect.objectContaining({ code: 'COLLECTION_ERROR', message: expect.stringContaining('"request"') })]);
   });
 
   it('keeps a configured secret out of the step label and the failure', async () => {
