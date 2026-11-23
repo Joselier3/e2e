@@ -825,6 +825,44 @@ describe('e2e init', () => {
     expect(output()).toContain('Updated .claude/skills/e2e/');
   });
 
+  it('points AGENTS.md and CLAUDE.md at the installed skill, once', async () => {
+    writeFileSync(path.join(dir, 'AGENTS.md'), '# Project\n');
+    vi.mocked(clack.confirm).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    expect((await init(dir)).exitCode).toBe(0);
+    expect(output()).toContain('  - Update AGENTS.md');
+    expect(output()).toContain('  - Create CLAUDE.md');
+    expect(output()).toContain('Updated AGENTS.md (e2e skill pointer)');
+    expect(output()).toContain('Created CLAUDE.md (e2e skill pointer)');
+    const agents = '# Project\n\nEnd-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.\n';
+    expect(read('AGENTS.md')).toBe(agents);
+    expect(read('CLAUDE.md')).toBe('End-to-end tests use e2e; read .claude/skills/e2e/SKILL.md before writing or running one.\n');
+
+    stdoutSpy.mockClear();
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(output()).toContain('Nothing to create; project already initialized');
+    expect(read('AGENTS.md')).toBe(agents);
+  });
+
+  it('adds the pointer on a re-run of a project whose skill is current', async () => {
+    writeCopy('.claude/skills');
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    rmSync(path.join(dir, 'CLAUDE.md'));
+    stdoutSpy.mockClear();
+    expect((await init(dir, { yes: true, mcp: [] })).exitCode).toBe(0);
+    expect(read('CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+    expect(existsSync(path.join(dir, 'AGENTS.md'))).toBe(false);
+    expect(output()).not.toContain('Nothing to create');
+  });
+
+  it('leaves a symlinked instructions file alone and names it', async () => {
+    writeFileSync(path.join(dir, 'shared.md'), '# Shared\n');
+    symlinkSync('shared.md', path.join(dir, 'AGENTS.md'));
+    expect((await init(dir, { yes: true, skills: ['.agents/skills'], mcp: [] })).exitCode).toBe(0);
+    expect(output()).toMatch(/Symlink, not touching: AGENTS\.md -> .*shared\.md \(e2e skill pointer\)/);
+    expect(read('shared.md')).toBe('# Shared\n');
+    expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(false);
+  });
+
   it('repairs a damaged copy without asking and leaves other locations alone', async () => {
     mkdirSync(path.join(dir, '.agents/skills/e2e/references'), { recursive: true });
     writeFileSync(path.join(dir, '.agents/skills/e2e/references/setup.md'), 'stale\n');
