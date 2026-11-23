@@ -139,6 +139,9 @@ function methodOf(options: APIRequestFetchOptions | undefined): string {
 /** The methods Node's fetch refuses to send. */
 const UNSENDABLE_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
 
+/** The headers Node's fetch refuses or sets itself, refused before the call so they never read as a network failure. */
+const UNSENDABLE_HEADERS = new Set(['content-length', 'expect', 'keep-alive', 'transfer-encoding', 'upgrade']);
+
 /**
  * The URL a call goes to: a path resolved against the app URL as `app.open`
  * resolves one, or an absolute one. Only http(s) passes, so unlike a
@@ -165,7 +168,7 @@ function requestUrl(input: unknown, base: NormalizedBaseUrl | undefined): URL {
     throw new TestError('INVALID_ARGUMENT', 'request: a URL must not contain credentials; send them in headers');
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new ConfigurationError('POLICY_DENIED', `request: forbidden URL scheme: ${url.protocol}`);
+    throw new ConfigurationError('POLICY_DENIED', 'request: a URL must be a path or an absolute http(s) URL');
   }
   return url;
 }
@@ -188,6 +191,9 @@ function requestInit(api: string, method: string, options: APIRequestOptions | u
   const headers = new Headers();
   for (const [name, value] of Object.entries(given ?? {})) {
     if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be a string`);
+    if (UNSENDABLE_HEADERS.has(name.toLowerCase())) {
+      throw new TestError('INVALID_ARGUMENT', `request: header "${name}" is set by fetch itself or not supported; leave it out`);
+    }
     try {
       validateHeaderName(name);
       validateHeaderValue(name, value);

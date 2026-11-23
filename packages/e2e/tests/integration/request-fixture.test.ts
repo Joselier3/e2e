@@ -175,7 +175,7 @@ test('a blank page', async ({ request }) => {
     expect(JSON.stringify(outcome.report)).not.toContain('query-placeholder-6021');
     expect(resultByTitle(outcome, 'another scheme').attempts[0]!.error?.code).toBe('POLICY_DENIED');
     expect(resultByTitle(outcome, 'a malformed absolute URL').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: malformed URL' });
-    expect(resultByTitle(outcome, 'a blank page').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: forbidden URL scheme: about:' });
+    expect(resultByTitle(outcome, 'a blank page').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: a URL must be a path or an absolute http(s) URL' });
   });
 
   it('refuses a malformed call before sending it, and names a network failure', async () => {
@@ -206,6 +206,10 @@ test('a refused connection on localhost', async ({ request }) => {
 
 test('an option request does not take', async ({ request }) => {
   await request.post('/api/refused-options', { data: { sku: 'A1' }, params: { id: '17' } } as never);
+});
+
+test('a header fetch sets itself', async ({ request }) => {
+  await request.post('/api/refused-options', { body: 'a', headers: { 'Transfer-Encoding': 'chunked' } });
 });
 
 test('headers as a Headers object', async ({ request }) => {
@@ -266,6 +270,7 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
     expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
     expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
+    expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Transfer-Encoding" is set by fetch itself or not supported; leave it out' });
     expect(api.paths).not.toContain('/api/refused-options');
     const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
     expect(refusal.error, JSON.stringify(refusal.error)).toBeUndefined();
@@ -311,7 +316,7 @@ test('leaks nothing', async ({ request }) => {
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
     const attempt = resultByTitle(outcome, 'leaks nothing').attempts[0]!;
     expect(attempt.error?.code).toBe('ASSERTION_FAILED');
-    expect(attempt.steps).toHaveLength(1);
+    expect(attempt.steps.map((step) => step.label)).toEqual(['GET /api/missing/<secret:TOKEN>']);
     expect(JSON.stringify(outcome.report)).not.toContain(secret);
   });
 
