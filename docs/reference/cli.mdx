@@ -343,8 +343,8 @@ bunx e2e init my-app --example with-expo
 - `init` reads the existing config's imports and adds the packages
   `package.json` lacks, at the ranges a new project gets: `@e2e-dev/web` and
   `@e2e-dev/mobile` with `@e2e-dev/core`, `ai` with `zod`, and the provider
-  packages of a gateway `init` offers. It names any other undeclared package
-  the config imports and leaves it for you to add.
+  packages of a gateway `init` offers. Any other package the config imports
+  is yours to add.
 - MCP registration keeps extra settings on the e2e server, such as
   environment variables and client timeouts, even when it repairs the launch
   command. A current registration stays byte-for-byte unchanged.

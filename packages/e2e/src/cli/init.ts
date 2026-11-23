@@ -406,12 +406,15 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   }
   const existingConfigText = existingConfig === undefined ? undefined : readFileSync(path.join(cwd, existingConfig), 'utf8');
   // An existing config keeps its engines and gateway, so its own imports say which packages it needs.
-  const imported = existingConfig === undefined || existingConfigText === undefined ? undefined : configDependencies(existingConfig, existingConfigText);
-  const dependencies = addDependencies(pkg.manifest, { ...scaffold.dependencies, ...imported?.known });
-  const undeclared = imported?.unknown.filter((name) => !declaresDependency(pkg.manifest, name)) ?? [];
-  if (example === undefined && undeclared.length > 0) {
-    clack.log.info(`${existingConfig} also imports ${undeclared.join(', ')}, not in package.json; init has no version for ${undeclared.length === 1 ? 'it' : 'them'}, so add ${undeclared.length === 1 ? 'it' : 'them'} yourself`);
+  let imported: Readonly<Record<string, string>> = {};
+  if (existingConfig !== undefined && existingConfigText !== undefined) {
+    try {
+      imported = configDependencies(existingConfig, existingConfigText);
+    } catch (cause) {
+      clack.log.warn(`Could not read the imports of ${existingConfig}, so its packages were not checked against package.json: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
   }
+  const dependencies = addDependencies(pkg.manifest, { ...scaffold.dependencies, ...imported });
   const { manifest, additions: scripts } = addScripts(dependencies.manifest, SCRIPTS);
   if (example === undefined && dependencies.additions.length > 0) {
     clack.log.info(`Add dev dependencies: ${dependencies.additions.map(([name, version]) => `${name}@${version}`).join(', ')}`);

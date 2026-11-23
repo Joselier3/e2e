@@ -494,12 +494,12 @@ describe('e2e init', () => {
       ai: '^7.0.0',
     });
     expect(output()).toContain('Add dev dependencies: @e2e-dev/web@0.x, @e2e-dev/core@0.x, @ai-sdk/openai@^4.0.0, ai@^7.0.0');
-    expect(output()).toContain('e2e.config.ts also imports dotenv, not in package.json; init has no version for it, so add it yourself');
+    expect(output()).not.toContain('dotenv');
     stdoutSpy.mockClear();
     expect(await init(dir, { yes: true })).toMatchObject({ exitCode: 0, result: 'already-initialized' });
   });
 
-  it('reads re-exports and literal dynamic imports of an existing JavaScript config, and says nothing of a declared package', async () => {
+  it('reads re-exports and literal dynamic imports of an existing JavaScript config', async () => {
     writeFileSync(path.join(dir, 'e2e.config.mjs'), [
       "export { mobile } from '@e2e-dev/mobile/engine';",
       "const { openrouter } = await import('@openrouter/ai-sdk-provider');",
@@ -518,7 +518,13 @@ describe('e2e init', () => {
       ai: '^7.0.0',
       zod: '^4.1.8',
     });
-    expect(output()).not.toContain('also imports');
+  });
+
+  it('adds no model packages for an existing config that imports zod alone', async () => {
+    writeFileSync(path.join(dir, 'e2e.config.ts'), "import { z } from 'zod';\nexport default {};\n");
+    writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({ type: 'module', dependencies: { zod: '^3.0.0' } })}\n`);
+    expect((await init(dir, { yes: true })).exitCode).toBe(0);
+    expect(Object.keys(JSON.parse(read('package.json')).devDependencies)).toEqual(['e2e']);
   });
 
   it('writes no example test beside an existing config, so a deleted one stays deleted', async () => {
