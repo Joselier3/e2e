@@ -6,7 +6,7 @@ description: Check your API with the request fixture and value matchers, in the 
 ---
 
 An API test calls your API with the [`request`](/reference/request) fixture
-and checks the response with `toBeOK` and the value matchers. It sits in the
+and checks the response with the value matchers. It sits in the
 same files and the same run as UI tests, and calls no model.
 
 ```ts title="tests/users-api.e2e.ts"
@@ -17,7 +17,7 @@ const User = z.object({ id: z.number(), name: z.string() });
 
 test('GET /api/users returns the seeded users', async ({ request }) => {
   const response = await request.get('/api/users');
-  expect(response).toBeOK();
+  expect(response.status).toBe(200);
   expect(response.headers['content-type']).toContain('application/json');
   const users = expect(await response.json()).toMatchSchema(z.array(User));
   expect(users).toHaveLength(3);
@@ -58,20 +58,19 @@ import { test } from '@e2e-dev/web';
 test('lists my orders', async ({ app, browser, request }) => {
   await app.open('/sign-in');
   // ...sign in through the UI...
-  const { hostname } = new URL(app.baseUrl);
-  const onApp = (domain: string) => hostname === domain.replace(/^\./, '') || hostname.endsWith(domain.startsWith('.') ? domain : `.${domain}`);
-  const session = (await browser.cookies()).find((c) => c.name === 'session' && onApp(c.domain));
+  // The domain your app sets the cookie on: its host, or `.example.com` for `Domain=example.com`.
+  const domain = new URL(app.baseUrl).hostname;
+  const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === domain);
   if (session === undefined) throw new Error('not signed in');
   const headers = { cookie: `${session.name}=${session.value}` };
-  expect(await request.get('/api/orders', { headers })).toBeOK();
+  expect((await request.get('/api/orders', { headers })).status).toBe(200);
 });
 ```
 
 `browser.cookies()` returns every cookie of the browser context, those of
 other sites included, such as a sign-in provider's. Pick your app's session
-cookie by name and by a domain that covers the app's host (a cookie set with
-`Domain=example.com` reports `.example.com`), and send it only with paths on
-your app.
+cookie by its name and the exact domain your app sets it on, and send it
+only with paths on your app.
 
 ## Without a browser
 

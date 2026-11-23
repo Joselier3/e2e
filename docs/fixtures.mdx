@@ -87,8 +87,8 @@ that resets data:
 
 ```ts title="tests/fixtures.ts"
 export const test = base.extend<{ cleanData: void }>({
-  cleanData: [async ({ request }, use) => {
-    await request.post('/api/test/reset');
+  cleanData: [async ({ app }, use) => {
+    await fetch(`${app.baseUrl}/api/test/reset`, { method: 'POST' });
     await use();
   }, { auto: true }],
 });

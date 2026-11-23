@@ -748,19 +748,19 @@ export interface RecordedVideoLink {
  */
 export interface APIRequest {
   /** Sends a request with `options.method`, GET by default. */
-  fetch(url: string, options?: APIRequestFetchOptions): Promise<APIResponse>;
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<WebResponse>;
   /** Sends a GET request. */
-  get(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  get(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a POST request. */
-  post(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  post(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a PUT request. */
-  put(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  put(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a PATCH request. */
-  patch(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  patch(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a DELETE request. */
-  delete(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  delete(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a HEAD request. */
-  head(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  head(url: string, options?: APIRequestOptions): Promise<WebResponse>;
 }
 
 /** What one `request` call sends beside its URL. */
@@ -781,30 +781,23 @@ export interface APIRequestFetchOptions extends APIRequestOptions {
   readonly method?: string;
 }
 
-/** A `request` call's response, its body already read. `expect(response).toBeOK()` checks its status. */
-export interface APIResponse extends Expectable<APIResponseExpectation> {
-  /** The URL the response came from, after redirects. */
+/**
+ * An HTTP response: what `request` calls, the web engine's
+ * `browser.waitForResponse`, and `route.fetch()` return.
+ */
+export interface WebResponse {
+  /** Response URL, after redirects. */
   readonly url: string;
-  /** The HTTP status code. */
+  /** HTTP status. */
   readonly status: number;
-  /** The HTTP status text. */
-  readonly statusText: string;
-  /** Whether the status is 2xx. */
-  readonly ok: boolean;
-  /** Response headers, lower-cased names; several `set-cookie` values are joined with `\n`. */
+  /** Response headers, lower-cased names; `request` and `route.fetch()` join several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
   readonly headers: Readonly<Record<string, string>>;
-  /** The body as UTF-8 text. */
-  text(): Promise<string>;
-  /** The body parsed as JSON; `T` is not checked, so check it with `toMatchSchema`. */
+  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
+  body(): Promise<Buffer>;
+  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
   json<T = unknown>(): Promise<T>;
-}
-
-/** `expect(response)` for a `request` response. */
-export interface APIResponseExpectation {
-  /** Inverts the matcher. */
-  readonly not: { toBeOK(): void };
-  /** Requires a 2xx status. */
-  toBeOK(): void;
+  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
+  text(): Promise<string>;
 }
 
 export interface SetupSession {

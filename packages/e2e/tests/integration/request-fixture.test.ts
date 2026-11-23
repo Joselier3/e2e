@@ -15,13 +15,17 @@ import { resultByTitle, runProject } from '../helpers/run-project.ts';
 interface Api {
   readonly url: string;
   readonly closed: string[];
+  /** Every path the server was asked for. */
+  readonly paths: string[];
   close(): Promise<void>;
 }
 
 async function startApi(): Promise<Api> {
   const closed: string[] = [];
+  const paths: string[] = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
+    paths.push(url.pathname);
     if (url.pathname === '/api/orders' && request.method === 'POST') {
       let body = '';
       request.setEncoding('utf8');
@@ -58,6 +62,7 @@ async function startApi(): Promise<Api> {
   return {
     url: `http://127.0.0.1:${port}`,
     closed,
+    paths,
     close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
   };
 }
@@ -72,35 +77,22 @@ function onApi(extra: Partial<E2EConfig> = {}): Partial<E2EConfig> {
 }
 
 describe('request fixture', () => {
-  it('sends calls against the app URL, records each as a step, and checks them with toBeOK', async () => {
+  it('sends calls against the app URL, records each as a step, and returns a WebResponse', async () => {
     const file = `import { test, expect } from 'e2e';
 
 test('creates an order', async ({ request }) => {
   const created = await request.post('/api/orders?ref=r1', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
-  expect(created).toBeOK();
   expect(created.status).toBe(201);
+  expect(created.url).toBe('${api.url}/api/orders?ref=r1');
   expect(await created.json()).toEqual({ received: { sku: 'A1' }, contentType: 'application/json', query: '?ref=r1', auth: 'Bearer t' });
   const cookies = await request.get('/api/cookies');
   expect(cookies.headers['set-cookie']).toBe('a=1\\nb=2');
   expect(Object.hasOwn((await request.get('/api/proto')).headers, '__proto__')).toBe(true);
   expect(await cookies.text()).toBe('ok');
+  const bytes = await cookies.body();
+  expect(Buffer.isBuffer(bytes) && bytes.toString('utf8')).toBe('ok');
   const missing = await request.fetch('/api/missing', { method: 'delete' });
   expect(missing.status).toBe(404);
-  expect(missing.ok).toBe(false);
-  expect(missing).not.toBeOK();
-});
-
-test('fails toBeOK on a 404', async ({ request }) => {
-  expect(await request.get('/api/missing')).toBeOK();
-});
-
-test('fails not.toBeOK on a 2xx', async ({ request }) => {
-  expect(await request.get('/api/ok')).not.toBeOK();
-});
-
-test('keeps a soft toBeOK failure', async ({ request }) => {
-  expect.soft(await request.get('/api/missing')).toBeOK();
-  await request.get('/api/ok');
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
@@ -113,15 +105,6 @@ test('keeps a soft toBeOK failure', async ({ request }) => {
       { kind: 'resource', api: 'request.get', label: 'GET /api/proto', status: 'passed' },
       { kind: 'resource', api: 'request.fetch', label: 'DELETE /api/missing', status: 'passed' },
     ]);
-    const notOk = resultByTitle(outcome, 'fails toBeOK on a 404').attempts[0]!.error;
-    expect(notOk?.code).toBe('ASSERTION_FAILED');
-    expect(notOk?.message).toContain('expected GET /api/missing to be OK (a 2xx status), got 404 Not Found');
-    const ok = resultByTitle(outcome, 'fails not.toBeOK on a 2xx').attempts[0]!.error;
-    expect(ok?.code).toBe('ASSERTION_FAILED');
-    expect(ok?.message).toContain('expected GET /api/ok not to be OK, got 200 OK');
-    const soft = resultByTitle(outcome, 'keeps a soft toBeOK failure').attempts[0]!;
-    expect(soft.error?.message).toContain('1 soft assertion failed');
-    expect(soft.steps.map((step) => step.label)).toEqual(['GET /api/missing', 'GET /api/ok']);
   });
 
   it('aborts a call at the action timeout, and an afterEach call runs on its own budget after the body timed out', async () => {
@@ -162,7 +145,11 @@ test.describe('cleanup', () => {
     const file = `import { test, expect } from 'e2e';
 
 test('absolute', async ({ request }) => {
-  expect(await request.get('${api.url}/api/ok?x=1')).toBeOK();
+  expect((await request.get('${api.url}/api/ok?x=1')).status).toBe(200);
+});
+
+test('a malformed absolute URL', async ({ request }) => {
+  await request.get('http://[invalid');
 });
 
 test('relative', async ({ request }) => {
@@ -187,6 +174,7 @@ test('a blank page', async ({ request }) => {
     });
     expect(JSON.stringify(outcome.report)).not.toContain('query-placeholder-6021');
     expect(resultByTitle(outcome, 'another scheme').attempts[0]!.error?.code).toBe('POLICY_DENIED');
+    expect(resultByTitle(outcome, 'a malformed absolute URL').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: malformed URL' });
     expect(resultByTitle(outcome, 'a blank page').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: forbidden URL scheme: about:' });
   });
 
@@ -194,7 +182,7 @@ test('a blank page', async ({ request }) => {
     const closed = await freePort();
     // Not a configured secret: nothing redacts it, so only the fixture keeps it out.
     const PLACEHOLDER = 'unregistered-placeholder-5150';
-    const file = `import { test } from 'e2e';
+    const file = `import { secrets, test } from 'e2e';
 
 test('a GET with a body', async ({ request }) => {
   await request.get('/api/ok', { json: { a: 1 } });
@@ -237,11 +225,23 @@ test('a negative timeout', async ({ request }) => {
   await request.get('/api/ok', { timeout: -1 });
 });
 
+test('a timeout no timer holds', async ({ request }) => {
+  await request.get('/api/ok', { timeout: 2 ** 31 });
+});
+
+test('a control character in a header', async ({ request }) => {
+  await request.get('/api/ok', { headers: { 'x-trace': 'a\\u0001b' } });
+});
+
+test('a secret in json', async ({ request }) => {
+  await request.post('/api/secret-sink', { json: { token: secrets.get('TOKEN') } });
+});
+
 test('a bigint in json', async ({ request }) => {
   await request.post('/api/orders', { json: { n: 1n } });
 });
 `;
-    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
+    const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: 'request-sink-secret' } }) });
     const errorOf = (title: string) => resultByTitle(outcome, title).attempts[0]!.error;
     expect(errorOf('a GET with a body')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: a GET request takes no body' });
     expect(errorOf('json and body')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: pass json or body, not both' });
@@ -262,7 +262,11 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a header value with a line break')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "authorization" has an invalid name or value' });
     expect(errorOf('credentials in the URL')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: a URL must not contain credentials; send them in headers' });
     expect(errorOf('TRACE')?.code).toBe('INVALID_ARGUMENT');
-    expect(errorOf('a bigint in json')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: json must be a JSON-serializable value' });
+    expect(errorOf('a bigint in json')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: json must be JSON-safe, found bigint' });
+    expect(errorOf('a timeout no timer holds')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.get timeout must be at most 2147483647 milliseconds, got 2147483648' });
+    expect(errorOf('a control character in a header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "x-trace" has an invalid name or value' });
+    expect(errorOf('a secret in json')).toMatchObject({ code: 'POLICY_DENIED', message: 'request: json must not contain a Secret' });
+    expect(api.paths).not.toContain('/api/secret-sink');
     expect(JSON.stringify(outcome.report)).not.toContain(PLACEHOLDER);
   });
 
@@ -284,7 +288,7 @@ test('runs', async () => {});
     const file = `import { test, expect } from 'e2e';
 
 test('leaks nothing', async ({ request }) => {
-  expect(await request.get('/api/missing/${secret}')).toBeOK();
+  expect((await request.get('/api/missing/${secret}')).status).toBe(200);
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });

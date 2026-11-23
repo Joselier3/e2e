@@ -1,10 +1,11 @@
 /** The `request` fixture: HTTP calls from a test, each one a step bounded by the test's budget. */
 
-import { expectationBrand } from '../internal/brands.ts';
+import { validateHeaderName, validateHeaderValue } from 'node:http';
 import { ConfigurationError, errorMessage, TestError } from '../internal/errors.ts';
-import { stepTimeout, withAbort, withScopedBudget } from '../internal/time.ts';
+import { validateJsonValue } from '../internal/json-value.ts';
+import { MAX_TIMER_MS, stepTimeout, withAbort, withScopedBudget } from '../internal/time.ts';
 import type { NormalizedBaseUrl } from '../internal/urls.ts';
-import type { APIRequest, APIRequestFetchOptions, APIRequestOptions, APIResponse, APIResponseExpectation } from '../types.ts';
+import type { APIRequest, APIRequestFetchOptions, APIRequestOptions, WebResponse } from '../types.ts';
 import type { AttemptEnvironment } from './fixtures.ts';
 
 /** What one call runs under, read when the call starts. */
@@ -47,7 +48,7 @@ function send(
   readMethod: () => string,
   input: unknown,
   options: APIRequestOptions | undefined,
-): Promise<APIResponse> {
+): Promise<WebResponse> {
   const { environment } = wiring;
   const prepared = prepare(api, readMethod, input, options, environment.target.app.base);
   return environment.steps.run('resource', api, prepared.label, () => {
@@ -87,18 +88,27 @@ function prepare(
   const label = `${method} ${shownUrl(url, base)}`;
   try {
     const init = requestInit(method, options);
-    return { label, url, init, timeoutMs: stepTimeout(options?.timeout, api) };
+    return { label, url, init, timeoutMs: requestTimeout(options?.timeout, api) };
   } catch (refused) {
     return { label, refused };
   }
 }
 
+/** A call's own `timeout`: `stepTimeout`'s rules, at most what a timer can hold. */
+function requestTimeout(timeout: unknown, api: string): number | undefined {
+  const own = stepTimeout(timeout, api);
+  if (own !== undefined && own !== Number.POSITIVE_INFINITY && own > MAX_TIMER_MS) {
+    throw new TestError('INVALID_ARGUMENT', `${api} timeout must be at most ${MAX_TIMER_MS} milliseconds, got ${own}`);
+  }
+  return own;
+}
+
 /** The fetch and the body read, both under `signal`; a network failure is `ACTION_FAILED` naming the call. */
-async function exchange(url: URL, init: RequestInit, label: string, signal: AbortSignal): Promise<APIResponse> {
+async function exchange(url: URL, init: RequestInit, label: string, signal: AbortSignal): Promise<WebResponse> {
   try {
     const response = await fetch(url, { ...init, signal });
     const body = new Uint8Array(await response.arrayBuffer());
-    return apiResponse(response, body, label);
+    return webResponse(response, body);
   } catch (cause) {
     // An abort is the budget's or the timeout's: the wrappers above report it.
     if (signal.aborted) throw cause;
@@ -138,7 +148,8 @@ function requestUrl(input: unknown, base: NormalizedBaseUrl | undefined): URL {
   if (typeof input !== 'string' || input === '') {
     throw new TestError('INVALID_ARGUMENT', 'request: url must be a non-empty string, a path or an absolute http(s) URL');
   }
-  if (base === undefined && !URL.canParse(input)) {
+  // Only an input with no scheme is a path; `http://[bad` stays malformed.
+  if (base === undefined && !/^[a-z][a-z0-9+.-]*:/i.test(input)) {
     throw new ConfigurationError(
       'APP_URL_REQUIRED',
       'request: a path needs an app URL to resolve against; the target declares no app.url, so pass an absolute URL',
@@ -177,6 +188,8 @@ function requestInit(method: string, options: APIRequestOptions | undefined): Re
   for (const [name, value] of Object.entries(given ?? {})) {
     if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `request: header "${name}" must be a string`);
     try {
+      validateHeaderName(name);
+      validateHeaderValue(name, value);
       headers.set(name, value);
     } catch {
       // The value is not quoted: it may be a credential.
@@ -200,49 +213,26 @@ function requestBody(options: APIRequestOptions | undefined, headers: Headers): 
     return raw;
   }
   if (json === undefined) return undefined;
-  let text: string | undefined;
-  try {
-    text = JSON.stringify(json);
-  } catch {
-    text = undefined;
-  }
-  if (typeof text !== 'string') throw new TestError('INVALID_ARGUMENT', 'request: json must be a JSON-serializable value');
+  validateJsonValue(json, 'request: json');
+  const text = JSON.stringify(json);
   if (!headers.has('content-type')) headers.set('content-type', 'application/json');
   return text;
 }
 
-/** A response whose body was read inside the call's step, with `toBeOK()` on `expect(response)`. */
-function apiResponse(response: Response, body: Uint8Array, label: string): APIResponse {
+/** A `WebResponse` whose body was read inside the call's step. */
+function webResponse(response: Response, body: Uint8Array): WebResponse {
   // fromEntries defines each name as its own property, `__proto__` included.
   const headers: Record<string, string> = Object.fromEntries([...response.headers].filter(([name]) => name !== 'set-cookie'));
   const cookies = response.headers.getSetCookie();
   if (cookies.length > 0) headers['set-cookie'] = cookies.join('\n');
   const text = (): string => new TextDecoder().decode(body);
-  const result = {
+  return {
     url: response.url,
     status: response.status,
-    statusText: response.statusText,
-    ok: response.ok,
     headers,
-    text: () => Promise.resolve(text()),
+    body: async () => Buffer.from(body),
+    text: async () => text(),
     // oxlint-disable-next-line e2e/no-unchecked-json -- public API: the caller names T, unknown by default
     json: async <T = unknown>() => JSON.parse(text()) as T,
-  };
-  return Object.defineProperty(result, expectationBrand, { enumerable: false, value: responseExpectation(result, label) }) as APIResponse;
-}
-
-/** `expect(response)`: `toBeOK()` and its negation. */
-function responseExpectation(response: Pick<APIResponse, 'ok' | 'status' | 'statusText'>, label: string): APIResponseExpectation {
-  const got = (): string => `${response.status}${response.statusText === '' ? '' : ` ${response.statusText}`}`;
-  const not = {
-    toBeOK(): void {
-      if (response.ok) throw new TestError('ASSERTION_FAILED', `expected ${label} not to be OK, got ${got()}`);
-    },
-  };
-  return {
-    not,
-    toBeOK(): void {
-      if (!response.ok) throw new TestError('ASSERTION_FAILED', `expected ${label} to be OK (a 2xx status), got ${got()}`);
-    },
   };
 }

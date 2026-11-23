@@ -12,7 +12,7 @@ import { expect, test } from 'e2e';
 
 test('creates an order', async ({ request }) => {
   const created = await request.post('/api/orders', { json: { sku: 'A1' } });
-  expect(created).toBeOK();
+  expect(created.status).toBe(201);
   expect(await created.json()).toMatchObject({ sku: 'A1' });
 });
 ```
@@ -21,16 +21,16 @@ test('creates an order', async ({ request }) => {
 
 | Method | Returns |
 | --- | --- |
-| [`fetch`](#fetch) | `Promise<APIResponse>` |
-| [`get`](#shorthands) | `Promise<APIResponse>` |
-| [`post`](#shorthands) | `Promise<APIResponse>` |
-| [`put`](#shorthands) | `Promise<APIResponse>` |
-| [`patch`](#shorthands) | `Promise<APIResponse>` |
-| [`delete`](#shorthands) | `Promise<APIResponse>` |
-| [`head`](#shorthands) | `Promise<APIResponse>` |
+| [`fetch`](#fetch) | `Promise<WebResponse>` |
+| [`get`](#shorthands) | `Promise<WebResponse>` |
+| [`post`](#shorthands) | `Promise<WebResponse>` |
+| [`put`](#shorthands) | `Promise<WebResponse>` |
+| [`patch`](#shorthands) | `Promise<WebResponse>` |
+| [`delete`](#shorthands) | `Promise<WebResponse>` |
+| [`head`](#shorthands) | `Promise<WebResponse>` |
 
-Every method takes a URL and [options](#options), and returns an
-[`APIResponse`](#apiresponse).
+Every method takes a URL and [options](#options), and returns a
+[`WebResponse`](#webresponse).
 
 ### `fetch`
 
@@ -65,49 +65,38 @@ A `GET` or `HEAD` request takes no body.
 | `method` | `string` | `'GET'` |
 
 - `json` is sent through `JSON.stringify`, with
-  `content-type: application/json` unless `headers` sets a content type.
+  `content-type: application/json` unless `headers` sets a content type. It
+  takes JSON-safe values only: plain objects, arrays, strings, finite
+  numbers, booleans, and `null`. A `secrets.get()` handle in it is refused.
 - `body` is sent as is. Pass `json` or `body`, not both. Form, multipart,
   and binary bodies are not supported yet.
-- `timeout` is in milliseconds. `0` sets no timeout of its own, so only the
-  running test's or hook's budget bounds the call.
+- `timeout` is in milliseconds, at most 2147483647. `0` sets no timeout of
+  its own, so only the running test's or hook's budget bounds the call.
 - `method` is an option of `fetch` only.
 
-### `APIResponse`
+### `WebResponse`
 
-The response, with its body already read.
+The response, with its body already read. It is the same type the web
+engine's [`browser.waitForResponse`](/reference/web#waitforresponse) and
+`route.fetch()` return.
 
 | Member | Type |
 | --- | --- |
 | `status` | `number` |
-| `statusText` | `string` |
-| `ok` | `boolean` |
 | `url` | `string` |
 | `headers` | `Record<string, string>` |
+| `body()` | `Promise<Buffer>` |
 | `text()` | `Promise<string>` |
 | `json<T>()` | `Promise<T>` |
 
-- `ok` is true for a 2xx status.
 - `url` is the URL after redirects. Redirects are followed.
 - `headers` has lower-cased names. Several `set-cookie` values are joined
   with `\n`.
 - `text()` decodes the body as UTF-8. `json()` parses it, `unknown` unless
   you name a type. Nothing checks that type: use
   [`toMatchSchema`](/reference/expect#matching-a-schema) to check it.
-
-### `toBeOK`
-
-`expect(response).toBeOK()` requires a 2xx status.
-`expect(response).not.toBeOK()` requires any other status.
-
-```ts
-expect(await request.get('/api/health')).toBeOK();
-expect(await request.get('/api/orders/unknown')).not.toBeOK();
-```
-
-The failure names the call and the status:
-`expected GET /api/health to be OK (a 2xx status), got 503 Service Unavailable`.
-`expect.soft` works the same way. The other matchers take a field of the
-response: `expect(response.status).toBe(201)`.
+- Check the status with the value matchers:
+  `expect(response.status).toBe(201)`.
 
 ## URLs
 
@@ -128,8 +117,8 @@ URL goes where it names, on any target.
 | Throws | When |
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
-| `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. |
-| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type, a header is invalid, `json` and `body` are both set, `json` cannot be serialized, a `GET` or `HEAD` request has a body, or the method is `CONNECT`, `TRACE`, or `TRACK`. |
+| `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. Also a `Secret` in `json`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type, a header name or value is invalid, `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, or the method is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
 
@@ -168,19 +157,19 @@ it. `beforeAll`, `afterAll`, and worker fixtures do not.
 ```ts
 export interface APIRequest {
   /** Sends a request with `options.method`, GET by default. */
-  fetch(url: string, options?: APIRequestFetchOptions): Promise<APIResponse>;
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<WebResponse>;
   /** Sends a GET request. */
-  get(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  get(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a POST request. */
-  post(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  post(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a PUT request. */
-  put(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  put(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a PATCH request. */
-  patch(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  patch(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a DELETE request. */
-  delete(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  delete(url: string, options?: APIRequestOptions): Promise<WebResponse>;
   /** Sends a HEAD request. */
-  head(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  head(url: string, options?: APIRequestOptions): Promise<WebResponse>;
 }
 
 /** What one `request` call sends beside its URL. */
@@ -201,30 +190,23 @@ export interface APIRequestFetchOptions extends APIRequestOptions {
   readonly method?: string;
 }
 
-/** A `request` call's response, its body already read. `expect(response).toBeOK()` checks its status. */
-export interface APIResponse extends Expectable<APIResponseExpectation> {
-  /** The URL the response came from, after redirects. */
+/**
+ * An HTTP response: what `request` calls, the web engine's
+ * `browser.waitForResponse`, and `route.fetch()` return.
+ */
+export interface WebResponse {
+  /** Response URL, after redirects. */
   readonly url: string;
-  /** The HTTP status code. */
+  /** HTTP status. */
   readonly status: number;
-  /** The HTTP status text. */
-  readonly statusText: string;
-  /** Whether the status is 2xx. */
-  readonly ok: boolean;
-  /** Response headers, lower-cased names; several `set-cookie` values are joined with `\n`. */
+  /** Response headers, lower-cased names; `request` and `route.fetch()` join several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
   readonly headers: Readonly<Record<string, string>>;
-  /** The body as UTF-8 text. */
-  text(): Promise<string>;
-  /** The body parsed as JSON; `T` is not checked, so check it with `toMatchSchema`. */
+  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
+  body(): Promise<Buffer>;
+  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
   json<T = unknown>(): Promise<T>;
-}
-
-/** `expect(response)` for a `request` response. */
-export interface APIResponseExpectation {
-  /** Inverts the matcher. */
-  readonly not: { toBeOK(): void };
-  /** Requires a 2xx status. */
-  toBeOK(): void;
+  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
+  text(): Promise<string>;
 }
 ```
 

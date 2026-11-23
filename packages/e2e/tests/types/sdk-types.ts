@@ -18,7 +18,7 @@ import {
   type ActionName,
   type Agent,
   type APIRequest,
-  type APIResponse,
+  type WebResponse,
   type App,
   type ArtifactStore,
   type AsyncExpectation,
@@ -1216,28 +1216,22 @@ void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: nu
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 
-// request: each call returns a response with its body read; expect(response) holds toBeOK only.
+// request: each call returns the WebResponse waitForResponse and route.fetch() return.
 test('request', async ({ request }) => {
   void (request satisfies APIRequest);
   const created = await request.post('/api/orders', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
-  void (created satisfies APIResponse);
+  void (created satisfies WebResponse);
   void (created.status satisfies number);
+  void ((await created.body()) satisfies Buffer);
   // @ts-expect-error json() is unknown unless the caller names a type
   void (await created.json()).id;
   void ((await created.json<{ id: number }>()).id satisfies number);
   void (expect(await created.json()).toMatchSchema(userSchema) satisfies { id: number });
-  expect(created).toBeOK();
-  expect(created).not.toBeOK();
-  expect.soft(created).toBeOK();
   expect(created.status).toBe(201);
   await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
   await request.get('/api/export', { timeout: 0 });
   // @ts-expect-error a timeout is milliseconds, not a string
   await request.get('/api/export', { timeout: '45s' });
-  // @ts-expect-error toBeOK is a matcher of a response, not of any value
-  expect(created.status).toBeOK();
-  // @ts-expect-error the value matchers take the response's fields, not the response
-  expect(created).toBe(created);
   // @ts-expect-error the method goes in request.fetch's options, not a shorthand's
   await request.get('/api/orders', { method: 'POST' });
   // @ts-expect-error a body is a string; an object goes in json
