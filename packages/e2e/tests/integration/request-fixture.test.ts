@@ -260,6 +260,10 @@ test('a malformed connection header', async ({ request }) => {
   await request.get('/api/refused-options', { headers: { connection: 'close,' } });
 });
 
+test('a body that is not JSON', async ({ request }) => {
+  await (await request.get('/api/ok')).json();
+});
+
 test('a header value that is not a string', async ({ request }) => {
   await request.get('/api/refused-options', { headers: { 'x-count': 3 as never } });
 });
@@ -322,6 +326,8 @@ test('a bigint in json', async ({ request }) => {
     expect(errorOf('a refused connection on localhost')?.message).toMatch(new RegExp(`^GET http://localhost:${closed}/api/ok failed: fetch failed: .*ECONNREFUSED`));
     expect(errorOf('an option request does not take')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request.post options has no keys "data", "params"; it takes headers, json, body, timeout' });
     expect(errorOf('headers as a Headers object')?.code).toBe('INVALID_ARGUMENT');
+    // V8's own message would quote the start of the body ("ok"), which can be part of a secret.
+    expect(errorOf('a body that is not JSON')?.message).toBe('the response body of GET /api/ok is not valid JSON');
     expect(errorOf('a header value that is not a string')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "x-count" must be a string' });
     expect(errorOf('a host header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Host" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });

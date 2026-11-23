@@ -109,7 +109,7 @@ async function exchange(url: URL, init: RequestInit, label: string, signal: Abor
   try {
     const response = await fetch(url, { ...init, signal });
     const body = new Uint8Array(await response.arrayBuffer());
-    return webResponse(response, body);
+    return webResponse(response, body, label);
   } catch (cause) {
     // An abort is the budget's or the timeout's: the wrappers above report it.
     if (signal.aborted) throw cause;
@@ -235,8 +235,22 @@ function requestBody(options: APIRequestOptions | undefined, headers: Headers): 
   return text;
 }
 
+/**
+ * The body parsed as JSON. V8's own error quotes the start of the text, which
+ * can be part of a secret the ledger only redacts whole, so the error names
+ * the call and quotes nothing.
+ */
+function parseBody<T>(text: string, label: string): T {
+  try {
+    // oxlint-disable-next-line e2e/no-unchecked-json -- public API: the caller names T, unknown by default
+    return JSON.parse(text) as T;
+  } catch {
+    throw new SyntaxError(`the response body of ${label} is not valid JSON`);
+  }
+}
+
 /** A `WebResponse` whose body was read inside the call's step. */
-function webResponse(response: Response, body: Uint8Array): WebResponse {
+function webResponse(response: Response, body: Uint8Array, label: string): WebResponse {
   // fromEntries defines each name as its own property, `__proto__` included.
   const headers: Record<string, string> = Object.fromEntries([...response.headers].filter(([name]) => name !== 'set-cookie'));
   const cookies = response.headers.getSetCookie();
@@ -248,7 +262,6 @@ function webResponse(response: Response, body: Uint8Array): WebResponse {
     headers,
     body: async () => Buffer.from(body),
     text: async () => text(),
-    // oxlint-disable-next-line e2e/no-unchecked-json -- public API: the caller names T, unknown by default
-    json: async <T = unknown>() => JSON.parse(text()) as T,
+    json: async <T = unknown>() => parseBody<T>(text(), label),
   };
 }
