@@ -454,7 +454,7 @@ async function relocate(
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'failed') {
       last = result.failure === 'target-not-found' ? result : { ...result, screen };
-      return retryable(result.failure, descriptor) ? undefined : last;
+      return retryable(result, descriptor) ? undefined : last;
     }
     const node = screen.nodes.get(result.id);
     return node === undefined ? undefined : { ...result, node };
@@ -467,8 +467,7 @@ async function relocate(
  * the same look at the app: an engine that renumbers its tree per
  * observation would otherwise hand the drag a source from one screen and a
  * destination from the next. Waits like `relocate` does, and gives up the
- * same way: a missing node or a positioned twin is worth another look, an
- * unpositioned ambiguity is not.
+ * same way (`retryable`).
  */
 async function relocatePair(
   host: ReplayHost,
@@ -477,15 +476,15 @@ async function relocatePair(
   look: Look,
 ): Promise<{ readonly kind: 'found'; readonly source: string; readonly destination: string } | { readonly kind: 'failed'; readonly failure: RelocationFailure }> {
   let last: RelocationFailure = 'target-not-found';
-  const failed = (descriptor: TraceTargetDescriptor, failure: RelocationFailure) => {
-    last = failure;
-    return retryable(failure, descriptor) ? undefined : { kind: 'failed' as const, failure };
+  const failed = (descriptor: TraceTargetDescriptor, result: Extract<RelocationResult, { kind: 'failed' }>) => {
+    last = result.failure;
+    return retryable(result, descriptor) ? undefined : { kind: 'failed' as const, failure: result.failure };
   };
   const settled = await pollSettled(host, (screen) => {
     const from = relocateDescriptor(source, screen.nodes);
-    if (from.kind === 'failed') return failed(source, from.failure);
+    if (from.kind === 'failed') return failed(source, from);
     const to = relocateDescriptor(destination, screen.nodes);
-    if (to.kind === 'failed') return failed(destination, to.failure);
+    if (to.kind === 'failed') return failed(destination, to);
     return { kind: 'found' as const, source: from.id, destination: to.id };
   }, look);
   return settled ?? { kind: 'failed', failure: last };
@@ -495,12 +494,16 @@ async function relocatePair(
  * Whether a failed relocation is worth another look. A missing target is: the
  * screen may still be settling. So is ambiguity for a descriptor that recorded
  * its position among twins: a form still rendering shows fewer of them than
- * the recording counted, and the count catches up. Ambiguity for a descriptor
- * without a position never is: two matching nodes will not become one by
- * waiting, and acting on either would be a guess.
+ * the recording counted, and the count catches up. A lone named match
+ * refused as a twin of the recorded node (`twinLeft`) is only when the
+ * recorded test id can come back and name the node by itself: a count that
+ * catches up would pick by order, and a twin that rendered ahead of the
+ * recorded node takes its place. Other ambiguity never is: two matching
+ * nodes will not become one by waiting, and acting on either would be a guess.
  */
-function retryable(failure: RelocationFailure, descriptor: TraceTargetDescriptor): boolean {
-  return failure === 'target-not-found' || descriptor.position !== undefined;
+function retryable(result: Extract<RelocationResult, { kind: 'failed' }>, descriptor: TraceTargetDescriptor): boolean {
+  if (result.failure === 'target-ambiguous' && result.twinLeft === true) return descriptor.twinsWithoutTestId === true;
+  return result.failure === 'target-not-found' || descriptor.position !== undefined;
 }
 
 /** A relocation with the node it found, or with the screen its look-alikes are on, for a replay that needs boxes. */
@@ -558,7 +561,9 @@ function placeWithin(
     const box = usableBox(relocated.node.rect);
     return box === undefined ? undefined : inside(box);
   }
-  if (relocated.failure !== 'target-ambiguous') return undefined;
+  // A named match refused as a twin of the recorded node is no choice to
+  // settle: the point may sit on the twin.
+  if (relocated.failure !== 'target-ambiguous' || relocated.twinLeft === true) return undefined;
   const { viewport, nodes } = relocated.screen;
   if (viewport.width !== planned.viewport.width || viewport.height !== planned.viewport.height) return undefined;
   const containing = relocated.candidates
@@ -612,7 +617,10 @@ async function scrollOnce(
     await host.actions.scroll(direction, { id: relocated.id });
     return { kind: 'list' };
   }
-  if ((list.spans ?? 0) < MAIN_LIST_SHARE) return { kind: 'failed', failure: relocated.failure };
+  // A list refused as the twin of the recorded one is not lost: scrolling
+  // the screen would scroll the twin.
+  const twinLeft = relocated.failure === 'target-ambiguous' && relocated.twinLeft === true;
+  if (twinLeft || (list.spans ?? 0) < MAIN_LIST_SHARE) return { kind: 'failed', failure: relocated.failure };
   await host.actions.scroll(direction);
   return { kind: 'viewport' };
 }

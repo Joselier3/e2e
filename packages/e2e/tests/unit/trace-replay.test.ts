@@ -691,3 +691,111 @@ describe('replayTrace: bare-point drags', () => {
     expect(gone.calls).not.toContain('dragAt');
   });
 });
+
+describe('replayTrace: the recorded control is gone and a twin is left', () => {
+  const setUp = (id: string, rect?: SemanticNode['rect'], testId?: string): SemanticNode => ({
+    ref: { id, revision: 'r1' },
+    role: 'button',
+    name: 'Set up',
+    ...(rect === undefined ? {} : { rect }),
+    ...(testId === undefined ? {} : { testId }),
+  });
+  const placed = { role: 'button', name: 'Set up', position: { index: 0, of: 2 } };
+  const flagged = { role: 'button', name: 'Set up', testId: 'setup-primary', twinsWithoutTestId: true as const };
+
+  it('hands off a point tap the twin now sits under, instead of tapping it', async () => {
+    // The recording tapped (300, 60) inside the first button; the second one moved into its place.
+    const pin: RecordedAction = { name: 'tapAt', summary: 'tap the point (300, 60)', point: { x: 300, y: 60 }, viewport: VIEWPORT };
+    for (const [target, twin] of [[placed, setUp('b', { x: 200, y: 0, width: 200, height: 200 })], [flagged, setUp('b', { x: 200, y: 0, width: 200, height: 200 }, 'setup-secondary')]] as const) {
+      const host = makeHost({ nodes: [twin] });
+      const outcome = await replayTrace(host, trace([{ ...pin, within: { target, fx: 0.5, fy: 0.3 } }]));
+      expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+      expect(host.calls).toEqual([]);
+    }
+  });
+
+  it('hands off a scroll on a list that filled the screen when one of its twins is left, instead of scrolling the screen', async () => {
+    const list: SemanticNode = { ref: { id: 'l2', revision: 'r1' }, role: 'list', name: 'Ledger', rect: { x: 0, y: 0, width: 1280, height: 500 } };
+    const target = { role: 'list', name: 'Ledger', position: { index: 0, of: 2 } };
+    const host = makeHost({ nodes: [list] });
+    expect(await replayTrace(host, trace([{ name: 'scroll', summary: 'scroll down', direction: 'down', target, spans: 0.6 }]))).toMatchObject({
+      completed: false,
+      executed: 0,
+      stopReason: 'target-ambiguous',
+    });
+    expect(host.calls).toEqual([]);
+  });
+
+  it('still taps a recorded point inside an unnamed control whose one look-alike is left under it, as main does', async () => {
+    const pin: RecordedAction = { name: 'tapAt', summary: 'tap the point (300, 60)', point: { x: 300, y: 60 }, viewport: VIEWPORT };
+    const icon: SemanticNode = { ref: { id: 'i2', revision: 'r1' }, role: 'button', rect: { x: 200, y: 0, width: 200, height: 200 } };
+    const group: SemanticNode[] = [{ ref: { id: 'g', revision: 'r1' }, role: 'group', name: 'Tools', children: [icon] }, icon];
+    const points: unknown[] = [];
+    const host = makeHost({ nodes: group, onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    const target = { role: 'button', within: 'Tools', position: { index: 0, of: 2 } };
+    const outcome = await replayTrace(host, trace([{ ...pin, within: { target, fx: 0.5, fy: 0.3 } }]));
+    expect(outcome).toMatchObject({ completed: true, executed: 1 });
+    expect(points).toEqual([{ x: 300, y: 60 }]);
+  });
+
+  it('still scrolls the screen for a list that filled it when a second list with its name appears, as main does', async () => {
+    const lists: SemanticNode[] = [
+      { ref: { id: 'l1', revision: 'r1' }, role: 'list', name: 'Results', rect: { x: 0, y: 0, width: 1280, height: 600 } },
+      { ref: { id: 'l2', revision: 'r1' }, role: 'list', name: 'Results', rect: { x: 0, y: 600, width: 1280, height: 100 } },
+    ];
+    const targets: unknown[] = [];
+    const host = makeHost({ nodes: lists, onAction: (name, detail) => void (name === 'scroll' && targets.push(detail)) });
+    const outcome = await replayTrace(host, trace([{ name: 'scroll', summary: 'scroll down', direction: 'down', target: { role: 'list', name: 'Results' }, spans: 0.8 }]));
+    expect(outcome).toMatchObject({ completed: true, executed: 1 });
+    expect(targets).toEqual([{ direction: 'down', t: undefined }]);
+  });
+
+  it('hands off at once when one of two recorded twins without test ids is left, rather than waiting for the count and picking by order', async () => {
+    const host = makeHost({});
+    let captures = 0;
+    host.capture = async () => {
+      captures += 1;
+      // The recorded button shows alone first; its twin then renders ahead of it, so the recorded place now names the twin.
+      return screen(captures < 2 ? [setUp('a')] : [setUp('b'), setUp('a')]);
+    };
+    const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up" (1 of 2)', target: placed }]));
+    expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(host.calls).toEqual([]);
+    expect(captures).toBeLessThan(3);
+  });
+
+  it('looks again for a drag source recorded by test id while one twin of it is on screen', async () => {
+    const drops: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'drag' && drops.push(detail)) });
+    let captures = 0;
+    host.capture = async () => {
+      captures += 1;
+      const twin = setUp('b', undefined, 'setup-secondary');
+      return screen(captures < 3 ? [twin, email] : [twin, setUp('a', undefined, 'setup-primary'), email]);
+    };
+    const outcome = await replayTrace(host, trace([{ name: 'drag', summary: 'drag', target: flagged, destination: { role: 'textbox', name: 'Email' } }]));
+    expect(outcome).toMatchObject({ completed: true, executed: 1 });
+    expect(drops).toEqual([{ source: { id: 'a' }, destination: { id: 'n2' } }]);
+  });
+
+  it('still hands off at once when two twins of a target recorded by test id are on screen', async () => {
+    const host = makeHost({ nodes: [setUp('b', undefined, 'setup-secondary'), setUp('c', undefined, 'setup-tertiary')] });
+    const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up"', target: flagged }]));
+    expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(host.calls).toEqual([]);
+    expect(host.observations).toBeLessThan(3);
+  });
+
+  it('looks again while one twin of a target recorded by test id is on screen, and taps the recorded one once it renders', async () => {
+    const taps: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'tap' && taps.push(detail)) });
+    let captures = 0;
+    host.capture = async () => {
+      captures += 1;
+      return screen(captures < 3 ? [setUp('b', undefined, 'setup-secondary')] : [setUp('b', undefined, 'setup-secondary'), setUp('a', undefined, 'setup-primary')]);
+    };
+    const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up"', target: flagged }]));
+    expect(outcome).toMatchObject({ completed: true, executed: 1 });
+    expect(taps).toEqual([{ id: 'a' }]);
+  });
+});

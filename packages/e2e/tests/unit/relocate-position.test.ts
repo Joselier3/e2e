@@ -62,6 +62,19 @@ describe('relocation with a recorded position', () => {
     ).toEqual({ kind: 'failed', failure: 'target-ambiguous', candidates: ['p', 'q', 'r', 's'] });
   });
 
+  it('diverges as ambiguous when one of two recorded twins is left, rather than taking it', () => {
+    expect(relocateDescriptor({ role: 'button', name: 'Set up', position: { index: 0, of: 2 } }, screen(button('q')))).toEqual({
+      kind: 'failed',
+      failure: 'target-ambiguous',
+      candidates: ['q'],
+      twinLeft: true,
+    });
+  });
+
+  it('still relocates a lone match the recording saw alone', () => {
+    expect(relocateDescriptor({ role: 'button', name: 'Set up' }, screen(button('q')))).toEqual({ kind: 'found', id: 'q' });
+  });
+
   it('still diverges without a recorded position', () => {
     expect(relocateDescriptor({ role: 'button', name: 'Set up' }, screen(button('p'), button('q')))).toEqual({
       kind: 'failed',

@@ -20,7 +20,7 @@ import { resolveNavigationUrl } from '../internal/urls.ts';
 import type { ActionEvent, ActionHook, BeforeActionHook, ClickOptions, JsonValue, Momentum, ScrollDirection, Secret } from '../types.ts';
 import { PROJECT_TOOL_EVENT_PREFIX, READ_ONLY_GRAMMAR, type GrammarActionName } from './action-names.ts';
 import { actionEvent, containerKey, describeAction, type PlacedPoint, type Placement, type RecordableAction } from './actions.ts';
-import { describePosition } from '../cache/relocate.ts';
+import { describePosition, hasTwinsWithoutTestId } from '../cache/relocate.ts';
 import { appNavigation } from '../cache/route.ts';
 import { isTapActionName, type NodeActionName, type PointActionName, type RecordedAction } from '../cache/trace.ts';
 import { derivedJoinReason, derivedReason } from './derived.ts';
@@ -171,6 +171,9 @@ export class ActionDispatcher {
    * of is still judged whole. A mutating project tool ends the run.
    */
   private typedRun: TypedValue[] = [];
+
+  /** The newest look when the last action ran: a later action addressed from it acts on a screen that action may have changed (`placementOf`). */
+  private actedFrom: AgentObservation | undefined;
 
   constructor(
     private readonly runtime: AgentContext,
@@ -784,6 +787,7 @@ export class ActionDispatcher {
       this.accounting.checkpoint(cause);
       throw cause;
     }
+    this.actedFrom = this.feed.latest;
     this.armAfter(action.name);
     this.recordTrace(action);
     await this.notify(action.name, (fields) => actionEvent(action, { ...fields, summary: describeAction(action, redaction).summary }));
@@ -953,15 +957,22 @@ export class ActionDispatcher {
    * sits in (that is what tells this row's "Delete" from the next row's when
    * the flow replays) and, when the description still matches several
    * controls, its position among them, so a replay that finds the same
-   * number picks the same one.
+   * number picks the same one. A node its test id alone tells apart notes
+   * whether its other fields have twins, so a replay that has lost the test
+   * id does not take a twin for it. A count taken on the look an earlier
+   * action of the step already ran from is marked: that action may have
+   * removed or added a twin, so the count may not be the one a replay sees.
    */
   private placementOf({ node, observation }: Resolved): Placement {
     const within = containerKey(node.ref.id, observation.nodes, observation.parents);
     const position = describePosition(node, within, observation.nodes);
-    return {
+    const placement: Placement = {
       ...(within === undefined ? {} : { within }),
       ...(position === undefined ? {} : { position }),
+      ...(hasTwinsWithoutTestId(node, within, observation.nodes) ? { twinsWithoutTestId: true } : {}),
     };
+    const counted = placement.position !== undefined || placement.twinsWithoutTestId !== undefined;
+    return counted && observation === this.actedFrom ? { ...placement, countedOnEarlierLook: true } : placement;
   }
 
   /**
