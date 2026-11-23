@@ -509,6 +509,17 @@ bunx e2e guide setup      # one topic
 | --- | --- |
 | `[topic]` | One of `setup`, `writing-tests`, `agent`, `running`, `explore`, `debugging`, `mcp`, or `bug-bash`. Default: the overview. An unknown topic exits 2 and names the valid ones. |
 
+The guide goes to stdout and one line naming its version to stderr. When
+the project has another e2e version installed than the CLI that runs, such
+as under a global install, `guide` prints the installed version's guide.
+When `package.json` declares a version that isn't installed yet and the CLI
+is another one (`npx` then downloads the latest release), the line names
+both versions and the command that prints the matching guide:
+
+```text
+Guide for e2e 0.24.0, but package.json declares e2e 0.23.0, which is not installed. For the matching guide, run `npm install` and then `npm exec -- e2e guide`, or run `npx e2e@0.23.0 guide`.
+```
+
 #### `e2e mcp`
 
 An MCP server on stdio that gives a coding agent a live session on the app.

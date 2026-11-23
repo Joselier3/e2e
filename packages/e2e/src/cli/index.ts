@@ -616,7 +616,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .argument('[topic]', `one of ${skillTopics().join(', ')}`)
     .addHelpText('after', ['', examples(['e2e guide', 'e2e guide writing-tests']), '', docsLine('/reference/cli#e2e-guide')].join('\n'))
     .action((topic: string | undefined) => {
-      process.exitCode = guide(topic);
+      process.exitCode = guide(topic, { version });
     });
 
   program

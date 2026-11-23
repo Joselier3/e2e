@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareVersions, formatVersion, parseVersion, satisfies } from '../../src/internal/semver.ts';
+import { compareVersions, formatVersion, parseVersion, satisfies, specAccepts } from '../../src/internal/semver.ts';
 
 function version(text: string) {
   const parsed = parseVersion(text);
@@ -58,5 +58,33 @@ describe('satisfies', () => {
     ['0.21.2', '', false],
   ] as const)('%s in %s is %s', (text, range, expected) => {
     expect(satisfies(version(text), range)).toBe(expected);
+  });
+});
+
+describe('specAccepts', () => {
+  it.each([
+    ['0.24.0', '0.23.0', false],
+    ['0.23.0', '0.23.0', true],
+    ['0.23.0', 'v0.23.0', true],
+    ['0.23.4', '^0.23.0', true],
+    ['0.24.0', '^0.23.0', false],
+    ['0.22.9', '^0.23.0', false],
+    ['1.9.0', '^1.2.3', true],
+    ['2.0.0', '^1.2.3', false],
+    ['0.0.4', '^0.0.3', false],
+    ['0.23.9', '~0.23.1', true],
+    ['1.3.0', '~1.2.3', false],
+    ['0.24.0', '>=0.23.0 <1', true],
+    ['0.24.1-nightly-20261019081103', '^0.24.1-nightly-20261018072924', true],
+    ['0.24.1-nightly-20261019081103', '^0.24.0', false],
+    // No version range to hold the version against.
+    ['0.24.0', 'latest', undefined],
+    ['0.24.0', '*', undefined],
+    ['0.24.0', '', undefined],
+    ['0.24.0', '^0.23', undefined],
+    ['0.24.0', 'workspace:*', undefined],
+    ['0.24.0', 'npm:e2e@0.23.0', undefined],
+  ] as const)('%s under %s is %s', (text, spec, expected) => {
+    expect(specAccepts(spec, version(text))).toBe(expected);
   });
 });

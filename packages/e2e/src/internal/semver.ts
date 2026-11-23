@@ -1,8 +1,8 @@
 /**
  * The slice of semantic versioning the CLI needs to reason about releases:
  * parsing, ordering, and the peer ranges the published packages carry
- * (`>=0.15.0 <1`, or one exact build for a prerelease). Anything else, a
- * caret or a tilde included, is a range this module does not read.
+ * (`>=0.15.0 <1`, or one exact build for a prerelease), plus the caret and
+ * tilde specs a package.json declares, which only `specAccepts` reads.
  */
 
 const VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u;
@@ -71,6 +71,30 @@ interface Comparator {
 export function satisfies(version: Version, range: string): boolean {
   const sets = range.split('||').map(parseComparatorSet);
   return sets.some((set) => set !== undefined && setSatisfies(version, set));
+}
+
+/**
+ * Whether a package.json spec admits `version`: an exact version, `^` or `~`
+ * before a full version, or a range `satisfies` reads. Undefined for a spec
+ * that names no version range here: a dist-tag, `*`, a workspace or file
+ * link, an alias.
+ */
+export function specAccepts(spec: string, version: Version): boolean | undefined {
+  const trimmed = spec.trim();
+  const sugar = /^([~^])\s*(.+)$/u.exec(trimmed);
+  if (sugar === null) {
+    return trimmed.split('||').every((set) => parseComparatorSet(set) !== undefined) ? satisfies(version, trimmed) : undefined;
+  }
+  const floor = parseVersion(sugar[2]!);
+  if (floor === undefined) return undefined;
+  // A caret holds the leftmost nonzero part; a tilde holds the minor.
+  const ceiling =
+    sugar[1] === '^' && floor.major > 0
+      ? `${floor.major + 1}.0.0`
+      : sugar[1] === '~' || floor.minor > 0
+        ? `${floor.major}.${floor.minor + 1}.0`
+        : `${floor.major}.0.${floor.patch + 1}`;
+  return satisfies(version, `>=${formatVersion(floor)} <${ceiling}`);
 }
 
 function parseComparatorSet(text: string): Comparator[] | undefined {

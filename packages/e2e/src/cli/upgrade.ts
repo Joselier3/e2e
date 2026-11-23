@@ -17,11 +17,12 @@ import { z } from 'zod';
 import { detectWorkspacePackageManager, execCommand, LOCKFILE_NAMES, type PackageManager } from '../internal/package-manager.ts';
 import { isCiMode } from '@e2e-dev/core/lib/config/resolve';
 import { insideProjectRoot, realpathOfExisting } from '@e2e-dev/core/lib/internal/paths';
+import { installedPackage } from '../internal/project-package.ts';
 import { compareVersions, parseVersion, satisfies } from '../internal/semver.ts';
 import type { UpgradeOutcome, UpgradeResult } from '../telemetry/events.ts';
 import { describeLinks, describeObstacles, findInstalledSkillDirs, planSkillInstall } from './init/agent-skill.ts';
 import { describeManifestError, readPackage, serializePackage } from './init/package.ts';
-import { readSkillFiles, SKILL_NAME } from './skill.ts';
+import { packagedSkillDirectory, readSkillFiles, SKILL_NAME } from './skill.ts';
 import type { UpgradeTarget } from './upgrade-target.ts';
 import { upgradeCelebration } from './star.ts';
 
@@ -268,21 +269,6 @@ function declaredPackages(dir: string, manifest: Manifest): { declared: Declared
 /** The version under the nearest `node_modules/<name>`, or undefined (not installed, or Plug'n'Play). */
 function installedVersion(dir: string, name: string): string | undefined {
   return installedPackage(dir, name)?.version;
-}
-
-/** The nearest `node_modules/<name>` from `dir` up whose package.json names a version, or undefined (not installed, or Plug'n'Play). */
-function installedPackage(dir: string, name: string): { dir: string; version: string } | undefined {
-  for (let current = dir; ; current = path.dirname(current)) {
-    const packageDir = path.join(current, 'node_modules', name);
-    try {
-      const manifest: unknown = JSON.parse(readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
-      const version = typeof manifest === 'object' && manifest !== null && 'version' in manifest ? manifest.version : undefined;
-      if (typeof version === 'string') return { dir: packageDir, version };
-    } catch {
-      // Not here; a workspace hoists to a parent.
-    }
-    if (path.dirname(current) === current) return undefined;
-  }
 }
 
 /** The registry the package manager would use when it set one for this process, else npm's. */
@@ -586,8 +572,8 @@ function refreshSkills(projectDir: string, manager: PackageManager, out: (text: 
   const dirs = skillCopies(projectDir);
   if (dirs.length === 0) return;
   const installed = installedPackage(projectDir, RUNNER);
-  const skillDir = installed === undefined ? undefined : path.join(installed.dir, 'skills', SKILL_NAME);
-  const bundled = skillDir === undefined || !existsSync(path.join(skillDir, 'SKILL.md')) ? [] : readSkillFiles(skillDir);
+  const skillDir = installed === undefined ? undefined : packagedSkillDirectory(installed.dir);
+  const bundled = skillDir === undefined ? [] : readSkillFiles(skillDir);
   if (bundled.length === 0) {
     out(`The agent skill in ${listSkillDirs(dirs)} may be the old version's; refresh it with ${execCommand(manager, 'e2e init')}`);
     return;
