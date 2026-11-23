@@ -74,6 +74,7 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | --- | --- |
 | [`toBeVisible`](#tobevisible-and-tobehidden) | Waits for visibility |
 | [`toBeHidden`](#tobevisible-and-tobehidden) | Waits for hidden or absent state |
+| [`toBeInViewport`](#tobeinviewport) | Waits for the match in the viewport |
 | [`toBeAttached`](#tobeattached) | Waits for one match to exist |
 | [`toBeEnabled`](#tobeenabled-and-tobedisabled) | Waits for enabled state |
 | [`toBeDisabled`](#tobeenabled-and-tobedisabled) | Waits for disabled state |
@@ -104,6 +105,27 @@ await expect(screen.getByRole('dialog')).toBeVisible();
 await expect(screen.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 });
 await expect(screen.getByRole('dialog')).toBeVisible({ visible: false }); // as toBeHidden()
 ```
+
+#### `toBeInViewport`
+
+Waits for the one match to be shown with part of its box inside the
+viewport. A visible node can be outside it: a pager page off to the side, or
+content scrolled out of view.
+
+```ts
+await expect(screen.getByText('Step 2 of 3')).toBeInViewport();
+await expect(screen.getByTestId('banner')).toBeInViewport({ ratio: 0.5 }); // default: 0
+await expect(screen.getByText('Step 1 of 3')).not.toBeInViewport();
+```
+
+- `ratio` is the share of the node's box that must be inside the viewport,
+  from `0` to `1`. `0` means any part. Any other value is `INVALID_ARGUMENT`.
+- The box is the node's `rect`, measured against the viewport size of a
+  screen observation, on the web, iOS, and Android. A part that a scrolling
+  container clips off still counts as inside.
+- Negated, it passes for a hidden, absent, or off-screen match.
+- A shown node the engine reports no box for keeps the matcher waiting,
+  negated or not.
 
 #### `toBeAttached`
 
@@ -865,8 +887,8 @@ has held:
 - Zero matches keep polling until the timeout.
 - Multiple matches fail immediately with `LOCATOR_AMBIGUOUS`.
 - `toBeHidden`, `toBeVisible({ visible: false })`,
-  `toBeAttached({ attached: false })`, negated visibility, and negated
-  `toBeAttached` accept zero matches.
+  `toBeAttached({ attached: false })`, negated visibility, negated
+  `toBeInViewport`, and negated `toBeAttached` accept zero matches.
 - For those, for `toHaveCount` and the list forms, and for
   `waitFor({ state: 'detached' })` and `'hidden'`, a locator under a frame
   that is not in the document is zero matches rather than a wait for the
@@ -971,6 +993,13 @@ export interface AsyncExpectation {
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
   /** Waits for hidden or absent state. */
   toBeHidden(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the one match to be shown with part of its box inside the
+   * viewport of the latest screen observation; `ratio` (0 to 1, default 0)
+   * is the share of the box that must be inside, 0 meaning any part. Negated,
+   * it passes for a hidden, absent, or off-screen match.
+   */
+  toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;
   /** Waits for one match to exist, visible or not; `attached: false` waits for none. */
   toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void>;
   /** Waits for enabled state; `enabled: false` waits for disabled state. */

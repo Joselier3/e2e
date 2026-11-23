@@ -1,6 +1,6 @@
 /** Runner-owned polling locator assertions. */
 
-import type { SemanticNode } from '@e2e-dev/core/lib/engine/surface';
+import type { SemanticNode, ViewportSize } from '@e2e-dev/core/lib/engine/surface';
 import { TestError } from '@e2e-dev/core/lib/internal/errors';
 import { rejectUnknownOptions } from '@e2e-dev/core/lib/internal/options';
 import {
@@ -14,6 +14,7 @@ import {
   type TextPattern,
 } from '@e2e-dev/core/lib/internal/text';
 import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
+import { shareInViewport } from '@e2e-dev/core/lib/internal/geometry';
 import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
 import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
@@ -35,6 +36,8 @@ interface Sample {
   readonly node: SemanticNode | null;
   /** Every current match, read; only a `wholeSet: 'read'` matcher asks for them. */
   readonly nodes: readonly SemanticNode[];
+  /** The viewport, read only by a `readsViewport` matcher and only for a shown node with a box. */
+  readonly viewport?: ViewportSize;
 }
 
 interface MatcherSpec {
@@ -63,6 +66,8 @@ interface MatcherSpec {
    * or the failure message reads it: withheld is redacted, not empty or absent.
    */
   readonly readsWithheld?: boolean;
+  /** The predicate measures the node against the viewport of a fresh screen observation. */
+  readonly readsViewport?: boolean;
   readonly predicate: (sample: Sample) => boolean;
   readonly describeExpected: string;
   readonly observed: (sample: Sample) => string;
@@ -246,7 +251,12 @@ class AsyncExpectationImpl implements AsyncExpectation {
     }
     const missingFrame = spec.evaluableWithoutNode === true ? 'empty' : 'wait';
     const { node, count } = await engine.tryRead(this.internals.expression, reads, missingFrame);
-    return { count, node, nodes: [] };
+    if (spec.readsViewport !== true || !isNodeVisible(node) || node.rect === undefined) {
+      return { count, node, nodes: [] };
+    }
+
+    const { viewport } = await reads.read((timeoutMs) => engine.session.observe(engine.readOperation(timeoutMs)));
+    return { count, node, nodes: [], viewport };
   }
 
   /** A state matcher; its Playwright flag set to `false` expects the opposite state. */
@@ -362,6 +372,35 @@ class AsyncExpectationImpl implements AsyncExpectation {
   toBeHidden(options?: { timeout?: number }): Promise<void> {
     this.readOptions('toBeHidden', options);
     return this.visibilityMatcher('toBeHidden', false, options?.timeout);
+  }
+
+  toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void> {
+    const api = this.api('toBeInViewport');
+    rejectUnknownOptions(api, options, ['ratio', 'timeout']);
+    const ratio = options?.ratio ?? 0;
+    if (typeof ratio !== 'number' || !(ratio >= 0 && ratio <= 1)) {
+      throw new TestError('INVALID_ARGUMENT', `${api} option ratio must be a number from 0 to 1`);
+    }
+
+    const share = (sample: Sample): number =>
+      sample.viewport === undefined || sample.node?.rect === undefined ? 0 : shareInViewport(sample.node.rect, sample.viewport);
+    return this.poll(
+      {
+        name: 'toBeInViewport',
+        evaluableWithoutNode: true,
+        evaluableNode: (node) => !isNodeVisible(node) || node.rect !== undefined,
+        readsViewport: true,
+        predicate: (sample) => share(sample) > 0 && share(sample) >= ratio,
+        describeExpected: ratio === 0 ? 'in viewport' : `in viewport with ratio ${ratio}`,
+        observed: (sample) => {
+          if (sample.node === null) return 'no node';
+          if (!isNodeVisible(sample.node)) return 'hidden';
+          if (sample.node.rect === undefined) return 'no box';
+          return `viewport ratio ${Number(share(sample).toFixed(2))}`;
+        },
+      },
+      options?.timeout,
+    );
   }
 
   toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void> {

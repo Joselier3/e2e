@@ -122,6 +122,7 @@ test('shows the home screen', async ({ agent, app, screen }) => {
 | `waitFor(el).toBeVisible().withTimeout(ms)` | `await expect(el).toBeVisible({ timeout: ms })` |
 | `.toBeVisible()`, `.toHaveText(t)` | The same |
 | `.not.toBeVisible()` | `.toBeHidden()` |
+| `.toBeVisible(50)`, and the 75% default | `.toBeInViewport({ ratio: 0.5 })`, which counts the share on screen, not views covering it. `.toBeVisible()` checks the platform's flag, not the area |
 | `.toExist()`, `.not.toExist()` | `.toBeAttached()`, `.toBeAttached({ attached: false })` |
 | `.toHaveToggleValue(true)` | `.toBeChecked()` |
 | `.toHaveLabel(l)` | `.toHaveAccessibleName(l)` |
@@ -178,7 +179,6 @@ on purpose.
 
 | Detox | Use today |
 | --- | --- |
-| `.toBeVisible(50)`, and the 75% default | `.toBeVisible()` checks the platform's flag, not the area. Compare `.boundingBox()` |
 | `web.element(by.web.cssSelector('x'))` | The WebView's accessibility text and labels, or an `agent.act` goal |
 | `device.resetContentAndSettings()` | `app.clearState()`, plus `device.clearKeychain()` on iOS |
 | `device: { type, os }`, `headless`, `bootArgs` | Create and boot the device in a CI step |

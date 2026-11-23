@@ -1,6 +1,10 @@
-/** A windowed list whose scrolling animates after the wheel event, as a smooth-scroll library does. */
+/**
+ * A windowed list whose scrolling animates after the wheel event, as a
+ * smooth-scroll library does, and a page whose content sits in, partly in,
+ * and out of the viewport.
+ */
 
-import type { PageRenderer } from './page.ts';
+import { constant, type PageRenderer } from './page.ts';
 
 const ROWS = 300;
 const ROW_HEIGHT = 60;
@@ -14,6 +18,31 @@ const ROW_HEIGHT = 60;
  * until the page reaches it.
  */
 export const SCROLL_PAGES: Record<string, PageRenderer> = {
+  // A full-width pager showing its first page, a box half below the bottom
+  // edge, a hidden note, and a paragraph far below the fold.
+  '/viewport': constant(`<!doctype html>
+<html>
+<head><title>Viewport</title>
+<style>
+  body { margin: 0; }
+  #pager { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  #pager section { flex: 0 0 100%; height: 200px; scroll-snap-align: start; }
+  #peek { position: fixed; left: 0; bottom: -20px; width: 100px; height: 40px; background: #eee; }
+</style>
+</head>
+<body>
+<h1>Viewport</h1>
+<div id="pager">
+  <section>First page</section>
+  <section>Second page</section>
+</div>
+<button onclick="pager.scrollLeft = pager.clientWidth">Next page</button>
+<div id="peek">Peeking box</div>
+<p hidden>Hidden note</p>
+<div style="height: 3000px"></div>
+<p>Far below</p>
+</body>
+</html>`),
   '/smooth-scroll': (_state, url) => {
     const smooth = url.searchParams.get('smooth') ?? 'none';
     const duration = Number(url.searchParams.get('ms') ?? 450);

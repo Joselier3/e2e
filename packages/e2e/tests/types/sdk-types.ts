@@ -510,6 +510,9 @@ void (screen.getByTestId('todo').allTextContents() satisfies Promise<string[]>);
 void (screen.getByTestId('todo').isHidden() satisfies Promise<boolean>);
 void (screen.getByTestId('todo').isDisabled() satisfies Promise<boolean>);
 void asyncExpectation.toBeAttached({ timeout: 1000 });
+void asyncExpectation.toBeInViewport({ ratio: 0.5, timeout: 1000 });
+// @ts-expect-error a viewport ratio is a number
+void asyncExpectation.toBeInViewport({ ratio: '0.5' });
 void asyncExpectation.toHaveText(['a', /b/], { timeout: 1000 });
 void asyncExpectation.toContainText(['a', /b/]);
 // @ts-expect-error a text list holds strings and RegExps only
