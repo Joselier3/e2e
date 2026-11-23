@@ -467,7 +467,7 @@ export interface ActionOptions {
  */
 export type Point = ViewportPoint;
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`; of the node for `locator.swipe`. */
+/** CSS pixels, or a percentage from `'0%'` through `'100%'` of the viewport's width (`x`) or height (`y`). For `locator.swipe`, the percentage is of the node. */
 export type ScreenCoordinate = number | `${number}%`;
 
 /** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
@@ -524,10 +524,10 @@ export interface SwipeOptions {
 
 /**
  * A swipe along a path between two points: a touch swipe on a device, a
- * pointer drag on a document platform. On `screen` the points are on the
- * viewport. On a locator they are on the node: pixels and percentages of its
- * width (`x`) or height (`y`), both from its top-left corner, the one
- * `tap({ position })` measures from.
+ * pointer drag on a document platform. The points are on the viewport for
+ * `screen.swipe` and on the node for `locator.swipe`. On a node, pixels and
+ * percentages are both measured from its top-left corner, the corner
+ * `tap({ position })` uses.
  */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
@@ -635,8 +635,8 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   scrollIntoView(options?: ActionOptions): Promise<void>;
   /**
    * Performs a swipe scoped to exactly one node: in a direction, or along a
-   * path between two points of its box once it is in view, which drags a
-   * pager that follows pointer drags and ignores a wheel event.
+   * path between two of its points. On the web, a path swipe is a pointer
+   * drag, so pagers that ignore a direction swipe's wheel event still turn.
    */
   swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
   /** Reads normalized text once a match exists, without retrying for a particular value. */

@@ -104,8 +104,8 @@ const pages = {
   }),
 
   // Coordinate input: a pad that reports where a tap landed relative to its
-  // own top-left corner, and where a swipe went down and lifted, and a pager
-  // that turns on pointer drags only, so a wheel leaves it alone.
+  // own top-left corner, and where a swipe went down and lifted. The pager
+  // below it only turns on pointer drags, so a wheel doesn't move it.
   '/pointer': () => ({
     title: 'Pointer',
     body: `<h1>Pointer</h1>

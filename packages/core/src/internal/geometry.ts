@@ -87,10 +87,10 @@ function resolveCoordinate(value: ScreenCoordinate, size: number): number {
 }
 
 /**
- * Resolves a point a test names on a node to viewport CSS pixels, measured
- * from `origin`, the corner `tap({ position })` measures from: pixels are an
- * offset from it, and a percentage is that share of the node's width (x) or
- * height (y) from it to the far edges of `box`, kept on the last pixel.
+ * Resolves a point on a node to viewport CSS pixels. Pixels and percentages
+ * are both measured from `origin`, the corner `tap({ position })` uses. A
+ * percentage is a share of the distance from `origin` to the far edges of
+ * `box`, kept on its last pixel.
  */
 export function resolveBoxPoint(point: ScreenPoint, box: Box, origin: ViewportPoint): ViewportPoint {
   const size = { width: box.x + box.width - origin.x, height: box.y + box.height - origin.y };
