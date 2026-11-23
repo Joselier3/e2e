@@ -563,8 +563,10 @@ import { z } from 'zod';
 const projectTest = test.extend<{ project: { id: string } }>({
   project: async ({ app, browser, request }, use) => {
     const { hostname } = new URL(app.baseUrl);
-    const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === hostname);
-    const headers = { cookie: `session=${session?.value ?? ''}` };
+    const onApp = (domain: string) => hostname === domain.replace(/^\./, '') || hostname.endsWith(domain.startsWith('.') ? domain : `.${domain}`);
+    const session = (await browser.cookies()).find((c) => c.name === 'session' && onApp(c.domain));
+    if (session === undefined) throw new Error('not signed in: no session cookie for the app');
+    const headers = { cookie: `session=${session.value}` };
     const created = await request.post('/api/projects', { json: { name: `Project ${Date.now()}` }, headers });
     expect(created).toBeOK();
     const project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));

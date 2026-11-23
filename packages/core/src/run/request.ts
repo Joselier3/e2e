@@ -2,15 +2,15 @@
 
 import { expectationBrand } from '../internal/brands.ts';
 import { ConfigurationError, errorMessage, TestError } from '../internal/errors.ts';
-import { withAbort, withScopedBudget } from '../internal/time.ts';
-import { resolveNavigationUrl, type NormalizedBaseUrl } from '../internal/urls.ts';
+import { stepTimeout, withAbort, withScopedBudget } from '../internal/time.ts';
+import type { NormalizedBaseUrl } from '../internal/urls.ts';
 import type { APIRequest, APIRequestFetchOptions, APIRequestOptions, APIResponse, APIResponseExpectation } from '../types.ts';
 import type { AttemptEnvironment } from './fixtures.ts';
 
 /** What one call runs under, read when the call starts. */
 export interface RequestWiring {
   readonly environment: AttemptEnvironment;
-  /** The action timeout in milliseconds, read per call: an `@e2e-dev/core` session's `setDefaultTimeout` moves it. */
+  /** The action timeout in milliseconds, read when each call starts. */
   readonly actionTimeout: () => number;
 }
 
@@ -29,13 +29,17 @@ export function createRequest(wiring: RequestWiring): APIRequest {
   };
 }
 
-/** One call, checked before it is sent: what goes out and its step label, or why it cannot. */
-type Prepared = { readonly url: URL; readonly init: RequestInit; readonly label: string } | { readonly refused: unknown };
+/** One call, checked before it is sent: its step label, and what goes out or why it cannot. */
+type Prepared = { readonly label: string } & (
+  | { readonly url: URL; readonly init: RequestInit; readonly timeoutMs: number | undefined }
+  | { readonly refused: unknown }
+);
 
 /**
  * Sends one request inside a `resource` step and returns its buffered
- * response. A call its arguments refuse still opens the step, unlabeled so
- * nothing it was given is shown, and rejects inside it.
+ * response. A refused call still opens the step and rejects inside it; its
+ * label is `METHOD /path` once the method and URL passed, else empty, so
+ * nothing a refused URL holds is shown.
  */
 function send(
   wiring: RequestWiring,
@@ -45,11 +49,11 @@ function send(
   options: APIRequestOptions | undefined,
 ): Promise<APIResponse> {
   const { environment } = wiring;
-  const prepared = prepare(readMethod, input, options, environment.target.app.base);
-  return environment.steps.run('resource', api, 'label' in prepared ? prepared.label : '', () => {
+  const prepared = prepare(api, readMethod, input, options, environment.target.app.base);
+  return environment.steps.run('resource', api, prepared.label, () => {
     if ('refused' in prepared) return Promise.reject(prepared.refused);
     const { url, init, label } = prepared;
-    const timeoutMs = wiring.actionTimeout();
+    const timeoutMs = prepared.timeoutMs ?? wiring.actionTimeout();
     const { signal } = environment.budget;
     return withAbort(
       () => withScopedBudget(
@@ -64,14 +68,28 @@ function send(
   });
 }
 
-/** Checks the method, URL, and options of one call. */
-function prepare(readMethod: () => string, input: unknown, options: APIRequestOptions | undefined, base: NormalizedBaseUrl | undefined): Prepared {
+/** Checks the method and URL of one call, then its options. */
+function prepare(
+  api: string,
+  readMethod: () => string,
+  input: unknown,
+  options: APIRequestOptions | undefined,
+  base: NormalizedBaseUrl | undefined,
+): Prepared {
+  let method: string;
+  let url: URL;
   try {
-    const method = readMethod();
-    const url = requestUrl(input, base);
-    return { url, init: requestInit(method, options), label: `${method} ${shownUrl(url, base)}` };
+    method = readMethod();
+    url = requestUrl(input, base);
   } catch (refused) {
-    return { refused };
+    return { label: '', refused };
+  }
+  const label = `${method} ${shownUrl(url, base)}`;
+  try {
+    const init = requestInit(method, options);
+    return { label, url, init, timeoutMs: stepTimeout(options?.timeout, api) };
+  } catch (refused) {
+    return { label, refused };
   }
 }
 
@@ -112,8 +130,9 @@ function methodOf(options: APIRequestFetchOptions | undefined): string {
 const UNSENDABLE_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
 
 /**
- * The URL a call goes to: a path resolved against the app URL, or an
- * absolute one. The navigation rule applies, so only http(s) passes.
+ * The URL a call goes to: a path resolved against the app URL as `app.open`
+ * resolves one, or an absolute one. Only http(s) passes, so unlike a
+ * navigation, `about:blank` is refused too. No refusal quotes the input.
  */
 function requestUrl(input: unknown, base: NormalizedBaseUrl | undefined): URL {
   if (typeof input !== 'string' || input === '') {
@@ -122,20 +141,18 @@ function requestUrl(input: unknown, base: NormalizedBaseUrl | undefined): URL {
   if (base === undefined && !URL.canParse(input)) {
     throw new ConfigurationError(
       'APP_URL_REQUIRED',
-      `request to "${input}" needs an app URL to resolve against; the target declares no app.url, so pass an absolute URL`,
+      'request: a path needs an app URL to resolve against; the target declares no app.url, so pass an absolute URL',
     );
   }
-  let parsed: URL;
+  let url: URL;
   try {
-    parsed = new URL(input, base?.href);
+    url = new URL(input, base?.href);
   } catch {
-    // The input is not quoted: it may carry credentials.
     throw new ConfigurationError('POLICY_DENIED', 'request: malformed URL');
   }
-  if (parsed.username !== '' || parsed.password !== '') {
+  if (url.username !== '' || url.password !== '') {
     throw new TestError('INVALID_ARGUMENT', 'request: a URL must not contain credentials; send them in headers');
   }
-  const url = new URL(resolveNavigationUrl(parsed.href, base).url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new ConfigurationError('POLICY_DENIED', `request: forbidden URL scheme: ${url.protocol}`);
   }

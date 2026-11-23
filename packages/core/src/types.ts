@@ -771,6 +771,8 @@ export interface APIRequestOptions {
   readonly json?: unknown;
   /** A body sent as is. Not with `json`. */
   readonly body?: string;
+  /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
+  readonly timeout?: number;
 }
 
 /** `request.fetch` options: the method beside the rest. */

@@ -132,6 +132,10 @@ test('hangs past the action timeout', async ({ request }) => {
   await request.get('/api/hang?who=action');
 });
 
+test('hangs past its own timeout', async ({ request }) => {
+  await request.get('/api/hang?who=own', { timeout: 300 });
+});
+
 test.describe('cleanup', () => {
   test.afterEach(async ({ request }) => {
     log('afterEach:' + (await request.get('/api/ok')).status);
@@ -146,11 +150,12 @@ test.describe('cleanup', () => {
     const action = resultByTitle(outcome, 'hangs past the action timeout').attempts[0]!;
     expect(action.error?.code).toBe('ACTION_FAILED');
     expect(action.error?.message).toContain('GET /api/hang exceeded its timeout of 1500ms');
+    expect(resultByTitle(outcome, 'hangs past its own timeout').attempts[0]!.error?.message).toContain('GET /api/hang exceeded its timeout of 300ms');
     const deadline = resultByTitle(outcome, 'hangs past the test timeout').attempts[0]!;
     expect(deadline.error?.code).toBe('TEST_TIMEOUT');
     expect(log.lines()).toEqual(['afterEach:200']);
     // The connection is dropped, not left open past the test.
-    await vi.waitFor(() => expect(api.closed.toSorted()).toEqual(['action', 'deadline']));
+    await vi.waitFor(() => expect(api.closed.toSorted()).toEqual(['action', 'deadline', 'own']));
   });
 
   it('takes an absolute URL on a target with no engine, and names the missing app URL for a path', async () => {
@@ -161,7 +166,7 @@ test('absolute', async ({ request }) => {
 });
 
 test('relative', async ({ request }) => {
-  await request.get('/api/ok');
+  await request.get('/api/ok?token=query-placeholder-6021');
 });
 
 test('another scheme', async ({ request }) => {
@@ -178,8 +183,9 @@ test('a blank page', async ({ request }) => {
     expect(absolute.attempts[0]!.steps.map((step) => step.label)).toEqual([`GET ${api.url}/api/ok`]);
     expect(resultByTitle(outcome, 'relative').attempts[0]!.error).toMatchObject({
       code: 'APP_URL_REQUIRED',
-      message: expect.stringContaining('request to "/api/ok" needs an app URL'),
+      message: expect.stringContaining('request: a path needs an app URL'),
     });
+    expect(JSON.stringify(outcome.report)).not.toContain('query-placeholder-6021');
     expect(resultByTitle(outcome, 'another scheme').attempts[0]!.error?.code).toBe('POLICY_DENIED');
     expect(resultByTitle(outcome, 'a blank page').attempts[0]!.error).toMatchObject({ code: 'POLICY_DENIED', message: 'request: forbidden URL scheme: about:' });
   });
@@ -227,6 +233,10 @@ test('TRACE', async ({ request }) => {
   await request.fetch('/api/ok', { method: 'trace' });
 });
 
+test('a negative timeout', async ({ request }) => {
+  await request.get('/api/ok', { timeout: -1 });
+});
+
 test('a bigint in json', async ({ request }) => {
   await request.post('/api/orders', { json: { n: 1n } });
 });
@@ -243,8 +253,11 @@ test('a bigint in json', async ({ request }) => {
     const refusal = resultByTitle(outcome, 'a refusal is a rejected promise and a failed step').attempts[0]!;
     expect(refusal.error, JSON.stringify(refusal.error)).toBeUndefined();
     expect(refusal.steps.map(({ api: name, label, status, error }) => ({ api: name, label, status, code: error?.code }))).toEqual([
-      { api: 'request.get', label: '', status: 'failed', code: 'INVALID_ARGUMENT' },
+      { api: 'request.get', label: 'GET /api/ok', status: 'failed', code: 'INVALID_ARGUMENT' },
     ]);
+    expect(errorOf('a negative timeout')?.message).toBe('request.get timeout must be a finite number of milliseconds, 0 or more; got -1');
+    // A refused URL leaves the label empty, so nothing it holds is shown.
+    expect(resultByTitle(outcome, 'credentials in the URL').attempts[0]!.steps.map((step) => step.label)).toEqual(['']);
     expect(errorOf('headers that are not an object')?.code).toBe('INVALID_ARGUMENT');
     expect(errorOf('a header value with a line break')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "authorization" has an invalid name or value' });
     expect(errorOf('credentials in the URL')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: a URL must not contain credentials; send them in headers' });

@@ -788,8 +788,7 @@ use [`expect.poll`](#polling-a-value).
 
 ```ts
 await expect(async () => {
-  const response = await fetch(`${app.baseUrl}/api/orders/42`);
-  expect(response.status).toBe(200);
+  expect(await request.get('/api/orders/42')).toBeOK();
   await expect(screen.getByRole('status')).toHaveText('Ready', { timeout: 200 });
 }, 'the order is ready').toPass({ timeout: 5_000 });
 ```

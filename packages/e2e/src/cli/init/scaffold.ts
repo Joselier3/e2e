@@ -39,9 +39,8 @@ const NO_ENGINE_CONFIG = `  // Add an engine here when your tests need to drive 
 
 const NO_ENGINE_EXAMPLE = `import { test, expect } from 'e2e';
 
-test('app responds', async () => {
-  const response = await fetch(process.env.APP_URL ?? 'http://localhost:3000');
-  expect(response.ok).toBe(true);
+test('app responds', async ({ request }) => {
+  expect(await request.get(process.env.APP_URL ?? 'http://localhost:3000')).toBeOK();
 });
 `;
 

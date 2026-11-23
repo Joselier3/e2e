@@ -38,6 +38,8 @@ matching it.
 A path such as `/api/users` resolves against the target's `app.url`, with
 the port the run picked when the URL declares port `0`. So one file runs
 against the `app.command` the config starts and against a deployed preview.
+A leading `/` starts at the origin: when `app.url` has a path, such as
+`/shop`, write ``request.get(`${app.baseUrl}/api/users`)``.
 
 When the API writes state after it answers, use
 [`expect.poll`](/reference/expect#polling-a-value) to read again until a
@@ -57,7 +59,8 @@ test('lists my orders', async ({ app, browser, request }) => {
   await app.open('/sign-in');
   // ...sign in through the UI...
   const { hostname } = new URL(app.baseUrl);
-  const session = (await browser.cookies()).find((c) => c.name === 'session' && c.domain === hostname);
+  const onApp = (domain: string) => hostname === domain.replace(/^\./, '') || hostname.endsWith(domain.startsWith('.') ? domain : `.${domain}`);
+  const session = (await browser.cookies()).find((c) => c.name === 'session' && onApp(c.domain));
   if (session === undefined) throw new Error('not signed in');
   const headers = { cookie: `${session.name}=${session.value}` };
   expect(await request.get('/api/orders', { headers })).toBeOK();
@@ -66,7 +69,9 @@ test('lists my orders', async ({ app, browser, request }) => {
 
 `browser.cookies()` returns every cookie of the browser context, those of
 other sites included, such as a sign-in provider's. Pick your app's session
-cookie by name and domain, and send it only with paths on your app.
+cookie by name and by a domain that covers the app's host (a cookie set with
+`Domain=example.com` reports `.example.com`), and send it only with paths on
+your app.
 
 ## Without a browser
 

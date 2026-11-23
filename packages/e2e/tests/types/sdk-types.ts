@@ -1231,6 +1231,9 @@ test('request', async ({ request }) => {
   expect.soft(created).toBeOK();
   expect(created.status).toBe(201);
   await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
+  await request.get('/api/export', { timeout: 0 });
+  // @ts-expect-error a timeout is milliseconds, not a string
+  await request.get('/api/export', { timeout: '45s' });
   // @ts-expect-error toBeOK is a matcher of a response, not of any value
   expect(created.status).toBeOK();
   // @ts-expect-error the value matchers take the response's fields, not the response

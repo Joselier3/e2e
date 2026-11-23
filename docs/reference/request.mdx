@@ -61,11 +61,15 @@ A `GET` or `HEAD` request takes no body.
 | `headers` | `Record<string, string>` | - |
 | `json` | `unknown` | - |
 | `body` | `string` | - |
+| `timeout` | `number` | `actionTimeout` |
 | `method` | `string` | `'GET'` |
 
 - `json` is sent through `JSON.stringify`, with
   `content-type: application/json` unless `headers` sets a content type.
-- `body` is sent as is. Pass `json` or `body`, not both.
+- `body` is sent as is. Pass `json` or `body`, not both. Form, multipart,
+  and binary bodies are not supported yet.
+- `timeout` is in milliseconds. `0` sets no timeout of its own, so only the
+  running test's or hook's budget bounds the call.
 - `method` is an option of `fetch` only.
 
 ### `APIResponse`
@@ -107,14 +111,24 @@ response: `expect(response.status).toBe(201)`.
 
 ## URLs
 
-A path such as `/api/orders` resolves against the target's `app.url`, the
-same base as [`app.baseUrl`](/reference/app#baseurl). An absolute `http` or
-`https` URL goes where it names, on any target.
+A path resolves against the target's `app.url` the way
+[`app.open`](/reference/app#open) resolves one. An absolute `http` or `https`
+URL goes where it names, on any target.
+
+- A leading `/` starts at the origin. With `app.url` set to
+  `https://example.com/shop`, `/api/orders` goes to
+  `https://example.com/api/orders`. To keep the base path, write
+  ``request.get(`${app.baseUrl}/api/orders`)``.
+- The call runs in the runner's process, on the runner's network. An app the
+  runner cannot reach, such as one inside a virtual machine the runner only
+  drives a browser in, is out of reach for `request` too.
+- The web engine's `headers` and `basicAuth` options apply to the browser
+  only. Pass the same values in a call's `headers`.
 
 | Throws | When |
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
-| `POLICY_DENIED` | The URL has a scheme other than `http` or `https`. |
+| `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. |
 | `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type, a header is invalid, `json` and `body` are both set, `json` cannot be serialized, a `GET` or `HEAD` request has a body, or the method is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
@@ -123,17 +137,18 @@ Each call is a step of kind `resource`, labeled with the method and the
 path: `POST /api/orders`. The label leaves out the query string. A path on
 another origin shows the origin too.
 
-A call these checks refuse is still a failed step, with no label, so nothing
-it was given is shown. Its promise rejects; the method never throws.
+A call these checks refuse is still a failed step, and its promise rejects;
+the method never throws. When the URL is what was refused, the step has no
+label, and no error message quotes the URL or a header value.
 
-A call is bounded by `actionTimeout` (default 30000 ms) and by the budget of
+A call is bounded by its `timeout`, `actionTimeout` (default 30000 ms) by default, and by the budget of
 the code that makes it: the test timeout in a test body, the cleanup timeout
 in an `afterEach` hook. When either runs out, e2e aborts the request. A
 test that runs out of time fails with its usual timeout error.
 
 | Throws | When |
 | --- | --- |
-| `ACTION_FAILED` | The call ran past `actionTimeout`, or the network failed: the server refused the connection, or the host does not resolve. |
+| `ACTION_FAILED` | The call ran past its `timeout`, or the network failed: the server refused the connection, or the host does not resolve. |
 
 A call is not retried. To retry a read, wrap it in
 [`expect.poll`](/reference/expect#polling-a-value).
@@ -176,6 +191,8 @@ export interface APIRequestOptions {
   readonly json?: unknown;
   /** A body sent as is. Not with `json`. */
   readonly body?: string;
+  /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
+  readonly timeout?: number;
 }
 
 /** `request.fetch` options: the method beside the rest. */
