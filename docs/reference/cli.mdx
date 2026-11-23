@@ -358,9 +358,11 @@ bunx e2e init my-app --example with-expo
   link where the link goes.
 - `AGENTS.md` and `CLAUDE.md` stay as they are once they name an installed
   skill file. So does a `CLAUDE.md` that is a symlink to an `AGENTS.md` with
-  the line, or imports it with `@AGENTS.md`. Any other symlinked
-  instructions file is skipped with a warning naming the link and its
-  target.
+  the line, or imports it on a line of its own with `@AGENTS.md`. `init`
+  never writes through a symlinked instructions file: one whose target lacks
+  the line is skipped with a warning naming the link and its target. A
+  directory in the file's place, or a file `init` cannot read or write, is
+  skipped with a warning too.
 - A copy with a directory where a file goes, or a file where a directory
   goes, is skipped with a warning naming the entry. `init` removes nothing to
   repair it.

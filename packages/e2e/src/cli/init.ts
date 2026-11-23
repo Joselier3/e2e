@@ -2,7 +2,7 @@
 
 import * as clack from '@clack/prompts';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { redactError } from '@e2e-dev/core/lib/run/secrecy';
@@ -453,6 +453,9 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   for (const link of instructions.links) {
     clack.log.warn(`Symlink, not touching: ${link.relative} -> ${link.target} (e2e skill pointer)`);
   }
+  for (const obstacle of instructions.obstacles) {
+    clack.log.warn(`Broken, not touching: ${obstacle.relative} (${obstacle.reason})`);
+  }
 
   // An example's package.json, config, and tests stay as the example has them.
   const files = example !== undefined ? [] : [
@@ -522,8 +525,13 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     clack.log.info(`Skipped the agent skill; agents can still print it with ${execCommand(manager, 'e2e guide')}`);
   }
   for (const write of instructions.writes) {
-    writeFileSync(write.absolute, write.content, 'utf8');
-    clack.log.success(`${write.existing ? 'Updated' : 'Created'} ${write.relative} (e2e skill pointer)`);
+    try {
+      appendFileSync(write.absolute, write.appended, 'utf8');
+      clack.log.success(`${write.existing ? 'Updated' : 'Created'} ${write.relative} (e2e skill pointer)`);
+    } catch (cause) {
+      // A read-only instructions file is no reason to stop a scaffold that is half written.
+      clack.log.warn(`Could not update ${write.relative} (${cause instanceof Error ? cause.message : String(cause)}); add the line: ${write.appended.trim()}`);
+    }
   }
   for (const registration of mcpRegistrations) {
     mkdirSync(path.dirname(registration.absolute), { recursive: true });

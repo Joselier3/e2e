@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,6 +7,8 @@ import { planAgentInstructions, skillPointer } from '../../src/cli/init/agent-in
 const BOTH = ['.agents/skills', '.claude/skills'];
 const AGENTS_LINE = 'End-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.';
 const CLAUDE_LINE = 'End-to-end tests use e2e; read .claude/skills/e2e/SKILL.md before writing or running one.';
+
+const NOTHING = { writes: [], links: [], obstacles: [] };
 
 let dir: string;
 
@@ -25,7 +27,7 @@ function write(file: string, content: string): void {
 /** Plans for `skillDirs` and applies the writes, as init does after the confirmation. */
 function run(skillDirs: readonly string[] = BOTH): ReturnType<typeof planAgentInstructions> {
   const plan = planAgentInstructions(dir, skillDirs, []);
-  for (const planned of plan.writes) writeFileSync(planned.absolute, planned.content);
+  for (const planned of plan.writes) appendFileSync(planned.absolute, planned.appended);
   return plan;
 }
 
@@ -70,8 +72,8 @@ describe('planAgentInstructions', () => {
 
   it('writes nothing without a chosen directory, or when the chosen one holds no skill', () => {
     installSkill('.agents/skills');
-    expect(run([])).toEqual({ writes: [], links: [] });
-    expect(run(['.claude/skills'])).toEqual({ writes: [], links: [] });
+    expect(run([])).toEqual(NOTHING);
+    expect(run(['.claude/skills'])).toEqual(NOTHING);
   });
 
   it.each([
@@ -92,7 +94,7 @@ describe('planAgentInstructions', () => {
     write('AGENTS.md', '# Project\n');
     run();
     const first = [read('AGENTS.md'), read('CLAUDE.md')];
-    expect(run()).toEqual({ writes: [], links: [] });
+    expect(run()).toEqual(NOTHING);
     expect([read('AGENTS.md'), read('CLAUDE.md')]).toEqual(first);
   });
 
@@ -115,7 +117,7 @@ describe('planAgentInstructions', () => {
     symlinkSync('AGENTS.md', path.join(dir, 'CLAUDE.md'));
     expect(run()).toMatchObject({ writes: [{ relative: 'AGENTS.md' }], links: [] });
     expect(read('CLAUDE.md')).toBe(`# Project\n\n${AGENTS_LINE}\n`);
-    expect(run()).toEqual({ writes: [], links: [] });
+    expect(run()).toEqual(NOTHING);
   });
 
   it('reports a symlink that leads to a file without the line', () => {
@@ -145,9 +147,41 @@ describe('planAgentInstructions', () => {
     expect(read('AGENTS.md')).toBe('# Project\n');
   });
 
-  it('skips a directory where the file goes', () => {
+  it('stays quiet about a symlink whose target already names the skill', () => {
+    installSkill('.agents/skills');
+    write('shared.md', `# Shared\n\n${AGENTS_LINE}\n`);
+    symlinkSync('shared.md', path.join(dir, 'AGENTS.md'));
+    expect(run(['.agents/skills'])).toEqual(NOTHING);
+  });
+
+  it('writes once through CLAUDE.md when AGENTS.md is a symlink to it', () => {
+    installSkill(...BOTH);
+    write('CLAUDE.md', '# Project\n');
+    symlinkSync('CLAUDE.md', path.join(dir, 'AGENTS.md'));
+    expect(run()).toMatchObject({ writes: [{ relative: 'CLAUDE.md' }], links: [] });
+    expect(read('AGENTS.md')).toBe(`# Project\n\n${CLAUDE_LINE}\n`);
+    expect(run()).toEqual(NOTHING);
+  });
+
+  it('keeps the bytes of a file that is not UTF-8', () => {
+    installSkill('.agents/skills');
+    const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+    writeFileSync(path.join(dir, 'AGENTS.md'), latin1);
+    run(['.agents/skills']);
+    expect(readFileSync(path.join(dir, 'AGENTS.md')).subarray(0, latin1.length)).toEqual(latin1);
+    expect(read('AGENTS.md').endsWith(`\n\n${AGENTS_LINE}\n`)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('names a file it cannot read', () => {
+    installSkill('.agents/skills');
+    write('AGENTS.md', '# Project\n');
+    chmodSync(path.join(dir, 'AGENTS.md'), 0o000);
+    expect(run(['.agents/skills'])).toEqual({ writes: [], links: [], obstacles: [{ relative: 'AGENTS.md', reason: 'unreadable' }] });
+  });
+
+  it('names a directory where the file goes', () => {
     installSkill('.agents/skills');
     mkdirSync(path.join(dir, 'AGENTS.md'));
-    expect(run(['.agents/skills'])).toEqual({ writes: [], links: [] });
+    expect(run(['.agents/skills'])).toEqual({ writes: [], links: [], obstacles: [{ relative: 'AGENTS.md', reason: 'not a file' }] });
   });
 });
