@@ -798,6 +798,28 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     }
   });
 
+  it('judges both ends of a drag on every look: a source still loading does not hide a destination twin left alone', async () => {
+    const done = (id: string): SemanticNode => ({ ref: { id, revision: 'r1' }, role: 'button', name: 'Done' });
+    const handle: SemanticNode = { ref: { id: 'h', revision: 'r1' }, role: 'button', name: 'Handle' };
+    const drops: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'drag' && drops.push(detail)) });
+    let captures = 0;
+    host.capture = async () => {
+      captures += 1;
+      // The recorded destination A shows alone while the handle loads; then its twin B renders ahead of it.
+      return screen(captures < 2 ? [done('a')] : [handle, done('b'), done('a')]);
+    };
+    const drag: RecordedAction = {
+      name: 'drag',
+      summary: 'drag',
+      target: { role: 'button', name: 'Handle' },
+      destination: { role: 'button', name: 'Done', position: { index: 0, of: 2 } },
+    };
+    const outcome = await replayTrace(host, trace([drag]));
+    expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(drops).toEqual([]);
+  });
+
   it('still hands off at once when two twins of a target recorded by test id are on screen', async () => {
     const host = makeHost({ nodes: [setUp('b', undefined, 'setup-secondary'), setUp('c', undefined, 'setup-tertiary')] });
     const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up"', target: flagged }]));

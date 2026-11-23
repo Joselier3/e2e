@@ -247,6 +247,7 @@ export function relocateDescriptor(
   const toldByText =
     matches.length === 1 &&
     descriptor.name === undefined &&
+    descriptor.testId !== undefined &&
     descriptor.text !== undefined &&
     descriptor.twinsWithoutTestId !== true &&
     describeNodes(nodes).find((candidate) => candidate.id === matches[0])?.descriptor.text === descriptor.text;

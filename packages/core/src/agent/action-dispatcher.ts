@@ -787,7 +787,10 @@ export class ActionDispatcher {
       this.accounting.checkpoint(cause);
       throw cause;
     }
-    this.actedFrom = this.feed.latest;
+    // Scrolling to text reads its last page after its last swipe, unless the
+    // engine then scrolled the node into view (`armAfter`): that page is a
+    // fresh look, not one the scroll acted from.
+    this.actedFrom = action.name === 'scrollUntil' && !this.verbs.has('scrollTo') ? undefined : this.feed.latest;
     this.armAfter(action.name);
     this.recordTrace(action);
     await this.notify(action.name, (fields) => actionEvent(action, { ...fields, summary: describeAction(action, redaction).summary }));

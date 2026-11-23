@@ -71,6 +71,18 @@ describe('relocation with a recorded position', () => {
     });
   });
 
+  it('diverges when one of two nameless controls showing the same text is left, with no test id to set the text apart', () => {
+    const preview = (id: string): SemanticNode => ({ ref: { id, revision: 'r' }, role: 'button', text: 'Preview' });
+    const both = screen(preview('p'), preview('q'));
+    expect(describePosition(both.get('p')!, undefined, both)).toEqual({ index: 0, of: 2 });
+    expect(relocateDescriptor({ role: 'button', text: 'Preview', position: { index: 0, of: 2 } }, screen(preview('q')))).toEqual({
+      kind: 'failed',
+      failure: 'target-ambiguous',
+      candidates: ['q'],
+      twinLeft: true,
+    });
+  });
+
   it('still relocates a lone match the recording saw alone', () => {
     expect(relocateDescriptor({ role: 'button', name: 'Set up' }, screen(button('q')))).toEqual({ kind: 'found', id: 'q' });
   });

@@ -492,11 +492,12 @@ async function relocatePair(
     return retryable(marked, descriptor) ? undefined : { kind: 'failed' as const, failure: marked.failure };
   };
   const settled = await pollSettled(host, (screen) => {
+    // Both ends are judged on every look: one still loading must not hide a
+    // refusal at the other, which a later look could settle by order.
     const from = relocateDescriptor(source, screen.nodes);
-    if (from.kind === 'failed') return failed(source, from);
     const to = relocateDescriptor(destination, screen.nodes);
-    if (to.kind === 'failed') return failed(destination, to);
-    return { kind: 'found' as const, source: from.id, destination: to.id };
+    if (from.kind === 'found' && to.kind === 'found') return { kind: 'found' as const, source: from.id, destination: to.id };
+    return (from.kind === 'failed' ? failed(source, from) : undefined) ?? (to.kind === 'failed' ? failed(destination, to) : undefined);
   }, look);
   return settled ?? { kind: 'failed', failure: last };
 }

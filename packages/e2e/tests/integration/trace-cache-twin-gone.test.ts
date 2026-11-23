@@ -8,6 +8,8 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
+import { createFakeEngine, FAKE_APP, FAKE_APP_URL } from '../helpers/fake-engine.ts';
+import type { ScriptedNode } from '../helpers/scripted-scene.ts';
 import { nodeIdFor } from '../helpers/fake-loop-model.ts';
 import { createProject, resultByTitle, runExisting, type FixtureProject } from '../helpers/run-project.ts';
 import { readEntries } from '../helpers/trace-cache.ts';
@@ -289,5 +291,58 @@ test('sets up and finishes', async ({ app, agent, screen }) => {
       { role: 'button', name: 'Set up', position: { index: 0, of: 2 } },
       { role: 'button', name: 'Done' },
     ]);
+  }, 240_000);
+});
+
+describe('trace cache: a press right after scrolling to text', () => {
+  it('trusts the count of a press addressed from the look the scroll ended on', async () => {
+    const fake = createFakeEngine({
+      actions: ['tap', 'swipe'],
+      scene: () => {
+        const status: ScriptedNode = { id: 'status', role: 'status', name: 'Setup', text: 'Not started' };
+        const press = (action: { kind: string }) => { if (action.kind === 'tap') status.text = 'Setup opened'; };
+        return [
+          status,
+          { id: 'first', role: 'button', name: 'Set up', appearsAfterSwipes: 1, rect: { x: 0, y: 20, width: 100, height: 40 }, on: press },
+          { id: 'second', role: 'button', name: 'Set up', appearsAfterSwipes: 1, rect: { x: 0, y: 80, width: 100, height: 40 }, on: press },
+        ];
+      },
+    });
+    // No look between the scroll and the press: the scroll read its last page after its last swipe.
+    const executor: StepExecutor = {
+      name: 'scroll-then-press',
+      version: 'test',
+      async runStep(context: StepExecutorContext) {
+        await context.observe();
+        await context.actions.scrollUntil('Set up', 'down');
+        await context.actions.tap({ id: 'first' });
+        return { status: 'passed' as const, summary: 'pressed Set up' };
+      },
+    };
+    const project = createProject({
+      'tests/scroll.e2e.ts': `import { test, expect } from 'e2e';
+test('scrolls and sets up', async ({ app, agent, screen }) => {
+  await app.open();
+  await agent.act('scroll to Set up and press it');
+  await expect(screen.getByRole('status', { name: 'Setup' })).toHaveText('Setup opened');
+});`,
+    });
+    try {
+      const run = await runExisting(project, {
+        appUrl: FAKE_APP_URL,
+        config: {
+          tests: 'tests/**/*.e2e.ts',
+          targets: [{ name: 'device', platform: 'ios' as const, engine: fake.engine, app: FAKE_APP }],
+          agents: { default: { executor } },
+          cache: 'read-write' as const,
+        },
+      });
+      expect(run.exitCode, JSON.stringify(run.report.run.errors)).toBe(0);
+      const [entry] = readEntries(project);
+      const tap = entry!.entry.payload.actions.find((action) => action.name === 'tap');
+      expect(tap?.name === 'tap' ? tap.target : undefined).toEqual({ role: 'button', name: 'Set up', within: 'Not started', position: { index: 0, of: 2 } });
+    } finally {
+      project.cleanup();
+    }
   }, 240_000);
 });
