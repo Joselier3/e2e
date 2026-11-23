@@ -454,12 +454,12 @@ async function relocate(
   const settled = await pollSettled(host, (screen): Relocated | undefined => {
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'failed') {
-      // A twin refused once stays refused while this relocation looks again:
-      // look-alikes that show up later are no reason to settle by the point
-      // or to scroll the screen, and only the recorded test id names the node.
+      // Keep the refusal while looking for the recorded test id. Later looks
+      // can show more twins or none, and neither justifies a fallback.
       refused ||= result.failure === 'target-ambiguous' && result.twinLeft === true;
       const failed = refused && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
-      last = failed.failure === 'target-not-found' ? failed : { ...failed, screen };
+      if (failed.failure === 'target-ambiguous') last = { ...failed, screen };
+      else if (!refused) last = failed;
       return retryable(failed, descriptor) ? undefined : last;
     }
     const node = screen.nodes.get(result.id);

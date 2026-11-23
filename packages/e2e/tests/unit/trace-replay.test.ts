@@ -786,13 +786,15 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     expect(host.observations).toBeLessThan(3);
   });
 
-  it('looks again while one twin of a target recorded by test id is on screen, and taps the recorded one once it renders', async () => {
+  it('taps the recorded target when its test id returns after a twin and an empty look', async () => {
     const taps: unknown[] = [];
     const host = makeHost({ onAction: (name, detail) => void (name === 'tap' && taps.push(detail)) });
     let captures = 0;
     host.capture = async () => {
       captures += 1;
-      return screen(captures < 3 ? [setUp('b', undefined, 'setup-secondary')] : [setUp('b', undefined, 'setup-secondary'), setUp('a', undefined, 'setup-primary')]);
+      if (captures === 1) return screen([setUp('b', undefined, 'setup-secondary')]);
+      if (captures === 2) return screen([]);
+      return screen([setUp('b', undefined, 'setup-secondary'), setUp('a', undefined, 'setup-primary')]);
     };
     const outcome = await replayTrace(host, trace([{ name: 'tap', summary: 'tap button "Set up"', target: flagged }]));
     expect(outcome).toMatchObject({ completed: true, executed: 1 });
@@ -839,14 +841,16 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     expect(host.calls).toEqual([]);
   });
 
-  it('keeps a twin refused while it looks again for the test id: a second list with its name is no reason to scroll the screen', async () => {
+  it.each(['another list appears', 'the twin disappears'] as const)('keeps a twin refused while it looks again for the test id when %s', async (nextLook) => {
     const ledger = { role: 'list', name: 'Ledger', testId: 'ledger-main', twinsWithoutTestId: true as const };
     const list = (id: string, testId: string, y: number, height: number): SemanticNode => ({ ref: { id, revision: 'r1' }, role: 'list', name: 'Ledger', testId, rect: { x: 0, y, width: 1280, height } });
     const host = makeHost({});
     let captures = 0;
     host.capture = async () => {
       captures += 1;
-      return screen(captures < 2 ? [list('l2', 'ledger-side', 0, 600)] : [list('l2', 'ledger-side', 0, 600), list('l3', 'ledger-mini', 600, 100)]);
+      const twin = list('l2', 'ledger-side', 0, 600);
+      if (captures === 1) return screen([twin]);
+      return screen(nextLook === 'the twin disappears' ? [] : [twin, list('l3', 'ledger-mini', 600, 100)]);
     };
     const outcome = await replayTrace(host, trace([{ name: 'scroll', summary: 'scroll down', direction: 'down', target: ledger, spans: 0.8 }]));
     expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
