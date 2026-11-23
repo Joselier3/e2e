@@ -59,6 +59,7 @@ const counted = createScriptedInstance('scripted', 'counted', async () => {
   appendFileSync('calls', 'call\\n');
   return scriptedResult([{ type: 'text', text: 'OK' }], 'stop');
 });
+const gated = createScriptedInstance('gateway', 'openai/answers', async () => scriptedResult([{ type: 'text', text: 'OK' }], 'stop'));
 const refusing = createScriptedInstance('scripted', 'refuses', async () => scriptedResult([], 'content-filter'));
 const erroring = createScriptedInstance('scripted', 'errors', async () => scriptedResult([], 'error'));
 const failing = createScriptedInstance('scripted', 'fails', async () => {
@@ -195,6 +196,24 @@ describe('e2e doctor', () => {
       { agent: 'both', status: 'fail', code: 'MODEL_PROVIDER_FAILED', message: expect.stringMatching(/^model: .*provider is down.*; judge: .*error finish/) },
       { agent: 'brought', status: 'fail', code: 'MODEL_PROVIDER_FAILED', message: expect.stringContaining('provider is down') },
     ]);
+  });
+
+  it('warns when a gateway model has none of the variables it reads, without calling it, and still exits 0', () => {
+    const files = { 'e2e.config.ts': config('agents: { default: { model: gated }, split: { model: answering, judge: gated } },') };
+    const keyless = doctorJson(files, [], { AI_GATEWAY_API_KEY: '', VERCEL_OIDC_TOKEN: '' });
+    expect(keyless.exitCode).toBe(0);
+    expect(keyless.report.checks.filter((check) => check.id === 'model').map(({ agent, status, message }) => ({ agent, status, message }))).toEqual([
+      { agent: 'default', status: 'warn', message: expect.stringMatching(/^AI_GATEWAY_API_KEY is not set: .*MODEL_UNAVAILABLE, unless the model signs in another way/) },
+      { agent: 'split', status: 'warn', message: expect.stringMatching(/^AI_GATEWAY_API_KEY is not set: /) },
+    ]);
+    for (const env of [{ AI_GATEWAY_API_KEY: 'vck_some_key', VERCEL_OIDC_TOKEN: '' }, { AI_GATEWAY_API_KEY: '', VERCEL_OIDC_TOKEN: 'a.linked.project' }]) {
+      const keyed = doctorJson(files, [], env);
+      expect(keyed.report.checks.filter((check) => check.id === 'model').map(({ status, message }) => ({ status, message }))).toEqual([
+        { status: 'unknown', message: 'the model reads its own credential; --check-model calls it' },
+        { status: 'unknown', message: 'the model reads its own credential; --check-model calls it' },
+      ]);
+      expect(JSON.stringify(keyed.report)).not.toMatch(/vck_some_key|a\.linked\.project/);
+    }
   });
 
   it('makes one call for agents with equal provider options, and counts a refusal as an answer', () => {

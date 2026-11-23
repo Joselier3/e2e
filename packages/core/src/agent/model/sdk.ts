@@ -15,6 +15,7 @@ import { aiSdk, asSdkLanguageModel, loadAiSdk, type SdkLanguageModel } from '../
 import { MODEL_REQUEST_HEADERS } from '../../internal/client-identity.ts';
 import { packageVersion } from '../../internal/package-version.ts';
 import { AgentError, isAgentError } from '../error.ts';
+import { withMissingCredentialNamed } from './missing-credential.ts';
 import { isContextOverflow } from './overflow.ts';
 import { providerHints, type ProviderModelRef } from './provider-hints.ts';
 import { withStallGuard } from './stall.ts';
@@ -65,7 +66,7 @@ export function createModelAdapter(model: ResolvedModel | undefined, agentName =
     async generate<Value>(call: ModelCall<Value>): Promise<ModelResult<Value>> {
       const ai = await loadAiSdk();
       const { generateText, jsonSchema, Output } = ai;
-      requestModel ??= withStallGuard(ai, languageModel);
+      requestModel ??= withStallGuard(ai, withMissingCredentialNamed(ai, languageModel));
       const hints = providerHints(languageModel as ProviderModelRef);
       const images = call.images ?? [];
       const inputBound =
@@ -374,7 +375,7 @@ function translateModelError(
   );
 }
 
-/** A marked failure (`internal/unserved-model.ts`) as the run-stopping `MODEL_UNAVAILABLE` the fixture reports once, or that error itself; undefined for any other failure. */
+/** A marked failure (`internal/unserved-model.ts`) as the run-stopping `MODEL_UNAVAILABLE` the fixture reports once, or that error itself, as a request with no credential to send already is (`missing-credential.ts`); undefined for any other failure. */
 export function unservedModelError(cause: unknown): AgentError | undefined {
   if (isUnservedModelError(cause)) return cause;
   const explanation = unservedModelExplanation(cause);
@@ -403,7 +404,9 @@ export function failureHint(cause: unknown): string {
  * A rejected credential is named for what it is. The model instance owns its
  * credential, read from the provider package's own variable
  * (`AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, ...) or passed at
- * construction, so the runner can only say that the provider refused it.
+ * construction, so the runner can only say that the provider refused it. A
+ * request with no credential at all never gets here: `missing-credential.ts`
+ * fails it first.
  */
 function credentialHint(failure: Error): string {
   // Gateways raise their own authentication error classes and a raw provider

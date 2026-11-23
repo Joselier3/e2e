@@ -27,6 +27,7 @@ import {
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
 } from './model/tool-choice.ts';
+import { withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
 import { providerHints, type ProviderHints, type ProviderModelRef } from './model/provider-hints.ts';
 import { isScreenOutput, reportsNoEffect, toolResultTexts } from './screen-update.ts';
@@ -312,7 +313,7 @@ class LoopRun {
     this.conclusion = createVerdictTool(context.step.kind);
     this.toolChoice = FREE_TOOL_CHOICE_MODELS.has(model) ? 'auto' : 'required';
     this.requestModel = ai.wrapLanguageModel({
-      model: withStallGuard(ai, model, (stallMs) => {
+      model: withStallGuard(ai, withMissingCredentialNamed(ai, model), (stallMs) => {
         this.note(`turn ${String(this.turnsUsed + 1)} got no response in ${String(stallMs / 1000)}s: sending it again`);
       }),
       middleware: {

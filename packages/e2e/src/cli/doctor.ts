@@ -3,7 +3,9 @@
  * anything. It loads the config, asks each target's engine what it needs on
  * this machine, and names the model each agent resolved to. It never claims
  * which credential a model reads: the instance owns that. Only a login e2e
- * stores is checked, and `--check-model` makes one real call per model.
+ * stores is checked, a gateway `e2e init` writes is warned about when the
+ * variables it reads are unset, and `--check-model` makes one real call per
+ * model.
  */
 
 import picocolors from 'picocolors';
@@ -22,6 +24,7 @@ import type { EngineDoctorCheck } from '@e2e-dev/core/lib/engine/index';
 import { classifyError, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { onBun, SUPPORTED_BUN_RANGE, SUPPORTED_NODE_RANGE } from '../internal/runtime.ts';
 import { budgetText, cancelledError, NEVER_ABORTS, withAbort, withinCleanupBudget } from '@e2e-dev/core/lib/internal/time';
+import { GATEWAYS } from './init/gateways.ts';
 import { loginOf } from '../oauth/login-model.ts';
 import { apiKeyFor, getProvider, loginHint, type ProviderId } from '../oauth/providers.ts';
 import { defaultCredentialStore } from '../oauth/store.ts';
@@ -52,7 +55,7 @@ const RESERVED_IDS: ReadonlySet<string> = new Set(['node', 'config', 'engine', '
 
 const ENGINE_STATUSES: ReadonlySet<string> = new Set<EngineDoctorCheck['status']>(['pass', 'warn', 'fail', 'skip']);
 
-/** `pass`; `warn` for what a run handles on its own; `fail` for what stops a run; `skip` for a check that does not apply; `unknown` for what doctor cannot tell. */
+/** `pass`; `warn` for what a run handles on its own, or what may stop one that doctor cannot prove; `fail` for what stops a run; `skip` for a check that does not apply; `unknown` for what doctor cannot tell. */
 export type DoctorStatus = 'pass' | 'warn' | 'fail' | 'skip' | 'unknown';
 
 /** A model as the AI SDK instance names itself. */
@@ -344,7 +347,26 @@ async function modelCheck(
   if (roles.every((entry) => loginOf(entry.model.model) !== undefined)) {
     return result('pass', { message: credentials.join('; ') });
   }
+  const unset = [...new Set(roles.flatMap((entry) => unsetGatewayKey(entry.model) ?? []))];
+  if (unset.length > 0) {
+    return result('warn', {
+      message: `${unset.join('; ')}: the first agent step that calls the model stops the run with MODEL_UNAVAILABLE, unless the model signs in another way; --check-model calls it`,
+    });
+  }
   return result('unknown', { message: 'the model reads its own credential; --check-model calls it' });
+}
+
+/**
+ * For a model of a gateway `e2e init` writes, when none of the variables that
+ * gateway reads is set: which one to set. Undefined for any other model, whose
+ * variable only its provider package knows. A warning and not a failure: a key
+ * passed at construction, or the token the Vercel AI Gateway fetches for a
+ * linked project, is invisible from here.
+ */
+function unsetGatewayKey(model: ResolvedModel, env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
+  const keys = GATEWAYS.find((gateway) => gateway.provider === model.provider)?.keys;
+  if (keys === undefined || keys.some((name) => (env[name] ?? '').trim() !== '')) return undefined;
+  return `${keys[0]!} is not set`;
 }
 
 function doctorModel(model: ResolvedModel): DoctorModel {
