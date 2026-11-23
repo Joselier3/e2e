@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EngineError, InfrastructureError, type EngineDoctorCheck } from '@e2e-dev/core/engine';
 import { browserType, type BrowserName } from './browser-connection.ts';
-import { missingHostLibraries, missingLibrariesMessage } from './host-libraries.ts';
+import { missingHostLibraries, missingLibrariesMessage, type HostLibraryProbe } from './host-libraries.ts';
 
 /** The executable of `chromium_headless_shell-<revision>` under `browsersPath`, once it finished installing. */
 function headlessShellExecutable(browsersPath: string, revision: string): string | undefined {
@@ -54,9 +54,9 @@ function headlessShellBeside(executable: string): string | undefined {
  * The system libraries the installed build of `name` cannot resolve on Linux;
  * empty when the build is absent, elsewhere, or on another platform.
  */
-export async function missingBrowserLibraries(name: BrowserName, env: NodeJS.ProcessEnv, headed: boolean): Promise<string[]> {
+export async function missingBrowserLibraries(name: BrowserName, env: NodeJS.ProcessEnv, headed: boolean, probe?: HostLibraryProbe): Promise<string[]> {
   const executable = await installedExecutable(name, env, headed);
-  return typeof executable === 'string' ? missingHostLibraries(executable, env) : [];
+  return typeof executable === 'string' ? missingHostLibraries(executable, env, probe) : [];
 }
 
 /** The `node` arguments that run the pinned `playwright-core` CLI with `args`. */

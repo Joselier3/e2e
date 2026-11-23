@@ -53,6 +53,10 @@ describe('missingHostLibraries', () => {
     expect(await missingHostLibraries(executable, {}, { platform: 'linux', ldd: async () => undefined })).toEqual([]);
   });
 
+  it.runIf(process.platform === 'linux')('resolves every library of a binary that runs here with the host ldd', async () => {
+    expect(await missingHostLibraries(process.execPath, process.env)).toEqual([]);
+  });
+
   it('never runs ldd off Linux', async () => {
     for (const platform of ['darwin', 'win32'] as const) {
       const missing = await missingHostLibraries(executable, {}, {

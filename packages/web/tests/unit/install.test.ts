@@ -283,6 +283,40 @@ console.log(String(value));
       expect(verdict(false)).toBe(false);
     });
 
+    /** Runs the built library check in such a process with a stubbed ldd; resolves to the files it asked about and its answer. */
+    const libraries = (headed: boolean): { asked: string[]; missing: string[] } => {
+      const probe = path.join(cache, 'libraries.mjs');
+      writeFileSync(
+        probe,
+        `import { missingBrowserLibraries } from ${JSON.stringify(built)};
+const asked = [];
+const missing = await missingBrowserLibraries('chromium', process.env, ${String(headed)}, {
+  platform: 'linux',
+  ldd: async (file) => { asked.push(file); return '\\tlibnss3.so => not found\\n'; },
+});
+console.log(JSON.stringify({ asked, missing }));
+`,
+      );
+      const child = spawnSync(process.execPath, [probe], {
+        encoding: 'utf8',
+        cwd: path.dirname(path.dirname(packageDir)),
+        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: cache },
+      });
+      if (child.status !== 0) throw new Error(`the library probe failed: ${child.stderr}`);
+      return JSON.parse(child.stdout) as { asked: string[]; missing: string[] };
+    };
+
+    it('checks the libraries of the build the run launches', () => {
+      lay('shell', 'full');
+      expect(libraries(false)).toEqual({ asked: [path.join(cache, `chromium_headless_shell-${revision}`, shellRelative)], missing: ['libnss3.so'] });
+      expect(libraries(true)).toEqual({ asked: [path.join(cache, `chromium-${revision}`, fullRelative)], missing: ['libnss3.so'] });
+    });
+
+    it('checks no libraries of a build that is not installed', () => {
+      lay('full');
+      expect(libraries(false)).toEqual({ asked: [], missing: [] });
+    });
+
     it('reads an empty cache as missing either way', () => {
       expect(verdict(false)).toBe(false);
       expect(verdict(true)).toBe(false);
