@@ -1576,12 +1576,13 @@ describe('perform', () => {
     await openAttempt(h);
     const before = h.fake.calls.length;
     await h.engine.keyboard!.press(key, operation());
-    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.tvRemote', { button }]]);
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.tvRemote', { platform: 'ios', button }]]);
   });
 
   it.each([
     ['Home', 'On a TV, the remote\'s button is "home"'],
     ['ArrowUp', 'On a TV, the remote\'s button is "up"'],
+    ['Escape', 'On a TV, the remote\'s button is "back"'],
     ['Tab', 'On a TV, press a remote button by its lowercase name: up, down, left, right, select, back, menu, home, play'],
     // Backspace deletes text; the remote's back leaves the screen, so it is not suggested.
     ['Backspace', 'On a TV, press a remote button by its lowercase name: up, down, left, right, select, back, menu, home, play'],
@@ -1610,6 +1611,8 @@ describe('perform', () => {
       throw new AppError('UNSUPPORTED_OPERATION', 'tv-remote is not supported on this device');
     });
     await expect(h.engine.keyboard!.press('menu', operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    // The grammar refuses a key with this code too: the refusal has to be the device's.
+    expect(h.fake.methods()).toContain('command.tvRemote');
   });
 
   it.each(['e2', ''])('presses the innermost control even when the row ref is %j', async (rowRef) => {
@@ -1890,8 +1893,8 @@ describe('device fixture', () => {
     await device.pressRemote('play-pause');
     await device.pressRemote('select');
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
-      ['command.tvRemote', { button: 'media-play-pause' }],
-      ['command.tvRemote', { button: 'select' }],
+      ['command.tvRemote', { platform: 'ios', button: 'media-play-pause' }],
+      ['command.tvRemote', { platform: 'ios', button: 'select' }],
     ]);
     await expect(device.pressRemote('Menu' as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a remote key') });
     expect(h.fake.calls).toHaveLength(before + 2);
@@ -2983,6 +2986,9 @@ describe('device fixture', () => {
       () => selected.clipboard(),
       () => selected.setClipboard('x'),
       () => selected.setPermission('camera', 'grant'),
+      // A remote reaches the launcher, so a test presses it with no app open.
+      () => selected.pressRemote('home'),
+      () => h.engine.keyboard!.press('menu', operation()),
       // iOS refuses going offline before any command, so the radios are Android's.
       ...(platform === 'ios' ? [
         () => selected.enrollBiometrics('touchid', true),

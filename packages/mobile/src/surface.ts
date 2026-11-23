@@ -1704,7 +1704,7 @@ export class AgentDeviceSurface {
   async pressFocusedKey(key: string, operation: OperationContext, input: InputBudget): Promise<void> {
     const before = this.latestScreen;
     if (isRemoteKey(key)) {
-      await this.command('tv-remote', (client) => pressRemote(client, key, input), operation.signal);
+      await this.command('tv-remote', (client) => pressRemote(client, key, input, this.selection()), operation.signal);
     } else {
       const soft = softKey(key);
       await this.command('keyboard.press', (client) => this.sendSoftKey(client, soft, input), operation.signal);

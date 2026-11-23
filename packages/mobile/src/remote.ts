@@ -2,6 +2,7 @@
 
 import { REMOTE_KEY_NAMES, TestError, isRemoteKey, type RemoteKeyName } from '@e2e-dev/core/engine';
 import type { AgentDeviceClient } from './options.ts';
+import type { DeviceSelection } from './pool.ts';
 import type { InputBudget } from './support.ts';
 
 type TvRemoteButton = Parameters<AgentDeviceClient['command']['tvRemote']>[0]['button'];
@@ -37,9 +38,9 @@ const REMOTE_BUTTONS = {
 /** A TV remote key `device.pressRemote` takes: one of the key grammar's `REMOTE_KEY_NAMES`. */
 export type RemoteKey = RemoteKeyName;
 
-/** Presses one remote button, within the operation's budget. */
-export function pressRemote(client: AgentDeviceClient, key: RemoteKey, input: InputBudget): Promise<unknown> {
-  return input.send(() => client.command.tvRemote({ button: REMOTE_BUTTONS[key] }));
+/** Presses one remote button, within the operation's budget. A remote reaches the launcher too, so the press names its device. */
+export function pressRemote(client: AgentDeviceClient, key: RemoteKey, input: InputBudget, selection: DeviceSelection): Promise<unknown> {
+  return input.send(() => client.command.tvRemote({ ...selection, button: REMOTE_BUTTONS[key] }));
 }
 
 /** Throws `INVALID_ARGUMENT` unless `key` is one of the remote keys. */

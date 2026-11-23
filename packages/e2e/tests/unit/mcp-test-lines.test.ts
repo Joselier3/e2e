@@ -376,6 +376,7 @@ describe('SessionTestLines', () => {
     expect(noteOf(await session.run('type', { value: 'x' }))).toBe('No test line: the value went to the focused field; type into a listed node by id for a line.');
     expect(noteOf(await session.run('press', { target: 'n60', key: 'ArrowDown', times: 3 }))).toMatch(/^No test line: a key pressed several times/);
     expect(noteOf(await session.run('press', { key: 'Enter' }))).toMatch(/^No test line: the key went to whatever had focus/);
+    expect(noteOf(await session.run('press', { key: 'menu' }))).toBe('No test line: the key went to the remote; press it with the engine fixture\'s remote call, device.pressRemote("menu") on mobile.');
     expect(noteOf(await session.run('scroll', { direction: 'down' }))).toMatch(/^No test line: a test action brings its node into view itself/);
     expect(noteOf(await session.run('scroll_to', { text: 'Row 40' }))).toMatch(/^No test line: scrolling to a text has none/);
     expect(noteOf(await session.run('type_secret', { target: 'n60', name: 'unknown' }))).toMatch(/^No test line: the secret is neither/);

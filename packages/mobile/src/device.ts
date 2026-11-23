@@ -390,7 +390,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async pressRemote(key) {
       requireRemoteKey(key);
       const input = surface.inputBudget('device.pressRemote', { timeoutMs: context.timeouts.action, signal: context.signal });
-      await surface.screenCommand('device.pressRemote', (client) => pressRemote(client, key, input), context.signal);
+      await surface.screenCommand('device.pressRemote', (client) => pressRemote(client, key, input, surface.selection()), context.signal);
     },
     async alert(action) {
       await surface.screenCommand('device.alert', (client) => client.command.alert({ ...surface.selection(), action }), context.signal);

@@ -24,6 +24,7 @@ import { isFailedResult } from '@e2e-dev/core/lib/agent/loop-guards';
 import { typedThroughKeyboard } from '@e2e-dev/core/lib/agent/primitives';
 import { SAMPLE_PREFIX } from '@e2e-dev/core/lib/agent/sample-files';
 import type { ScreenOutput } from '@e2e-dev/core/lib/agent/screen-update';
+import { isRemoteKey } from '@e2e-dev/core/lib/engine/contract';
 import type { LocatorExpression, NodeRef, SemanticNode } from '@e2e-dev/core/lib/engine/surface';
 import { codedMessage, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { collapseText } from '@e2e-dev/core/lib/internal/text';
@@ -298,9 +299,11 @@ export class SessionTestLines {
         return this.onTarget(target, (locator) => `${locator}.fill(${secret})`);
       }
       case 'press': {
+        const key = stringField(input, 'key') ?? '';
+        if (target === undefined && isRemoteKey(key)) return { reason: `the key went to the remote; press it with the engine fixture's remote call, device.pressRemote(${JSON.stringify(key)}) on mobile` };
         if (target === undefined) return { reason: 'the key went to whatever had focus; press it on a listed node by id for a line' };
         if (typeof input['times'] === 'number' && input['times'] > 1) return { reason: 'a key pressed several times in one call has no one-line equivalent; press it once per call for lines' };
-        return this.onTarget(target, (locator) => `${locator}.press(${JSON.stringify(stringField(input, 'key') ?? '')})`);
+        return this.onTarget(target, (locator) => `${locator}.press(${JSON.stringify(key)})`);
       }
       case 'select':
         return this.onTarget(target, (locator) => `${locator}.selectOption(${JSON.stringify(stringField(input, 'value') ?? '')})`);

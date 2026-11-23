@@ -319,11 +319,11 @@ export interface ExecutorActions {
    * Sends one key to whatever holds focus (`pressKey` in `target.verbs`), in
    * the contract's key grammar: a TV remote button such as `menu` goes to
    * the device's remote. A key outside the grammar rejects with
-   * `INVALID_ARGUMENT`; a key the engine or device lacks (a remote button on
-   * a browser or a phone) rejects with `UNSUPPORTED_CAPABILITY`. Catch it
-   * here to fall back: one left to escape `runStep` fails the step, and
-   * `agent.act` reports it as `POLICY_DENIED` with the engine's error as its
-   * `cause`.
+   * `INVALID_ARGUMENT`. A TV remote button on an engine that does not declare
+   * `remoteKeys` rejects with `UNSUPPORTED_CAPABILITY`; one the device lacks
+   * (a phone, or an Apple TV's media keys) rejects with `POLICY_DENIED`, the
+   * device's `UNSUPPORTED_CAPABILITY` as its `cause`. Catch either here to
+   * fall back: one left to escape `runStep` fails the step.
    */
   pressKey(key: string): Promise<void>;
   /** Hides an on-screen keyboard (`dismissKeyboard` in `target.verbs`). */
@@ -474,8 +474,9 @@ export interface StepExecutorContext {
    * `verbs` is the subset of the action grammar the engine declared, so an
    * executor offers a model exactly the vocabulary the surface can honor.
    * `tapModifiers` is true when `tap`, `doubleTap`, and `secondaryTap` accept
-   * `modifiers`. `remoteKeys` is true when `press` and `pressKey` take the
-   * TV remote keys (`REMOTE_KEY_NAMES`).
+   * `modifiers`. `remoteKeys` is true when the engine sends the TV remote
+   * keys (`REMOTE_KEY_NAMES`) to the device. A device without the button
+   * still refuses it, for example a phone.
    */
   readonly target: {
     readonly name: string;
