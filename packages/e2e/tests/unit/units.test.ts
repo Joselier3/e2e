@@ -316,6 +316,29 @@ describe('buildWorkPlans with parallel scopes', () => {
     expect(one.fileUnits.map((unit) => [unit.id, unit.share])).toEqual([[`file::web::${FILE}`, 1], [`file::web::${other}`, 1]]);
   });
 
+  it('ranks a unit that holds part of a file by that part of the time the file took', () => {
+    const other = 'tests/b.e2e.ts';
+    const tests = [
+      ...Array.from({ length: 3 }, (_, index) => makeTest(FILE, `part ${index}`, index, { parallel: inParallel })),
+      makeTest(other, 'whole', 0),
+    ];
+    const pairs = tests.map((test) => makePair(test));
+    const collection: Collection = {
+      files: [makeFile(FILE, tests.slice(0, 3)), makeFile(other, tests.slice(3))],
+      tests,
+      nearMisses: [],
+      unmatchedPositionals: [],
+      uncollected: [],
+    };
+    const plans = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    const durations = new Map([[FILE, 9_000], [other, 5_000]]);
+    const [ordered] = orderWorkPlans(plans, { relevanceOf: () => 0, durationOf: (_, file) => durations.get(file) });
+    expect(ordered!.fileUnits.map((unit) => unit.pairs[0]!.test.title)).toEqual(['whole', 'part 0', 'part 1', 'part 2']);
+    // Cut again for one worker, the file is whole and counts all of its time.
+    const [whole] = orderWorkPlans([withWorkerCap(plans[0]!, 1)], { relevanceOf: () => 0, durationOf: (_, file) => durations.get(file) });
+    expect(whole!.fileUnits.map((unit) => unit.file)).toEqual([FILE, other]);
+  });
+
   it('keeps the file whole when the target runs one worker', () => {
     const tests = [makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })];
     expect(unitsOf(tests, { workers: 1 })).toEqual([['one', 'two']]);
