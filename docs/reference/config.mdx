@@ -46,6 +46,7 @@ export default {
 | [`failOnSkippedFailure`](#failonskippedfailure) | `boolean` | `false` |
 | [`maxDuration`](#maxduration) | `number` | - |
 | [`workers`](#workers) | `number` | half the cores, `1` in CI |
+| [`fullyParallel`](#fullyparallel) | `boolean` | `false` |
 | [`reporters`](#reporters) | `(BuiltinReporter \| Reporter)[]` | `['list']` |
 | [`output`](#output) | `string` | `'.e2e'` |
 | [`artifacts`](#artifacts) | `ArtifactsConfig` | local only |
@@ -262,6 +263,22 @@ workers: 4, // default: 1 in CI, else half the cores
   before that, as
   [Start the likeliest first](/filters#start-the-likeliest-first) says.
 
+#### `fullyParallel`
+
+Runs the tests of one file at the same time on separate workers, in every
+file.
+
+```ts
+fullyParallel: true, // default: false
+```
+
+- By default, files run in parallel and a file's tests run in order on one
+  worker.
+- It works as [`parallel: true`](/reference/test#parallel) on every file.
+  That entry has the rules for hooks, serial groups, and `parallel: false`.
+- A target's `fullyParallel` wins over it. `--fully-parallel` wins over
+  both.
+
 #### `reporters`
 
 The reporters of the run: built-in ids, and reporter objects such as the
@@ -305,6 +322,7 @@ targets: [
 | [`app`](#the-app-under-test) | `TargetApp` | - |
 | [`trace`](#trace) | `RecordingMode` | the config's `trace` |
 | [`video`](#video) | `RecordingMode` | the config's `video` |
+| [`fullyParallel`](#fullyparallel) | `boolean` | the config's |
 
 - `{ engine: web(), app: { url } }` is a complete target.
 - A test whose `requires` names a capability the target lacks is skipped for
@@ -1629,6 +1647,8 @@ export interface E2EConfig {
   maxDuration?: number;
   /** Parallel workers, 1 through 1024; default 1 in CI, else half the cores. An engine may cap it lower. */
   workers?: number;
+  /** Runs the tests of one file at the same time on separate workers; default false. */
+  fullyParallel?: boolean;
   /** `{ store }` hands every artifact to a host store as it is produced. */
   artifacts?: ArtifactsConfig;
   /** Which tests keep a trace page; default `retain-on-failure`. */
@@ -1672,6 +1692,8 @@ export interface Target {
   trace?: RecordingMode;
   /** Which attempts on this target record a video, in place of the config's `video`. */
   video?: RecordingMode;
+  /** Whether this target runs the tests of one file in parallel, in place of the config's `fullyParallel`. */
+  fullyParallel?: boolean;
 }
 ```
 

@@ -150,6 +150,8 @@ export interface RunOptions {
   device?: string | undefined;
   retries?: number | undefined;
   workers?: number | undefined;
+  /** Runs the tests of one file in parallel on every target (`--fully-parallel`), over the config's `fullyParallel`. */
+  fullyParallel?: boolean | undefined;
   /**
    * The budget of every engine operation (`--action-timeout`), over the
    * config's `actionTimeout`; a call's own `timeout` still wins.
@@ -503,6 +505,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const cli: RunCliOverrides = {};
   if (options.retries !== undefined) cli.retries = options.retries;
   if (options.workers !== undefined) cli.workers = options.workers;
+  if (options.fullyParallel !== undefined) cli.fullyParallel = options.fullyParallel;
   if (options.actionTimeout !== undefined) cli.actionTimeout = options.actionTimeout;
   if (options.assertionTimeout !== undefined) cli.assertionTimeout = options.assertionTimeout;
   if (options.reporters !== undefined) cli.reporters = options.reporters;
@@ -1009,13 +1012,6 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     for (const message of options.tests?.notices ?? []) notice('run', message);
     for (const message of recordingNotices(selection.perTarget, grades, { explore: options.tests?.explore !== undefined })) notice('run', message);
 
-    // The work units, built once: the same plans tell each engine's `prepare`
-    // how many worker slots to provision and the scheduler what to dispatch.
-    let plans = buildWorkPlans(selection, collection, config.projectRoot);
-    // A run with nothing to run (the filters left nothing, or
-    // --pass-with-no-tests on an empty selection) still reports, but
-    // prepares no engine and starts no app.
-    const hasWork = plans.some((plan) => plan.setupUnits.length + plan.fileUnits.length > 0);
     // Workers re-load the config module themselves, so a file-backed config
     // runs across processes. A supplied `rawConfig` cannot cross a process
     // boundary (it may hold live engine handles), and neither can the bodies
@@ -1025,6 +1021,13 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const workerConfigPath = options.tests === undefined ? config.configPath : undefined;
     const inProcess = workerConfigPath === undefined;
     const runWorkers = inProcess ? 1 : config.workers;
+    // The work units, built once: the same plans tell each engine's `prepare`
+    // how many worker slots to provision and the scheduler what to dispatch.
+    let plans = buildWorkPlans(selection, collection, config.projectRoot, runWorkers);
+    // A run with nothing to run (the filters left nothing, or
+    // --pass-with-no-tests on an empty selection) still reports, but
+    // prepares no engine and starts no app.
+    const hasWork = plans.some((plan) => plan.setupUnits.length + plan.fileUnits.length > 0);
     // Starting long files early only pays when other workers take the rest, so only such a run reads the timings history.
     const previous = runWorkers > 1 ? await loadTimings(timingsPath(config), outputLayout(config.output).report) : undefined;
     plans = orderWorkPlans(plans, {

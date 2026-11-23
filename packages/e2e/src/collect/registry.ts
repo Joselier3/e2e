@@ -18,8 +18,10 @@ import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import { fixtureNames, type FixtureUserFn } from './fixture-names.ts';
 import { checkDeclaredFixtures, describeFixture, describeUser } from './fixture-plan.ts';
+import { checkParallel } from './parallel.ts';
 import type {
   DescribeAPI,
+  DescribeConfigureOptions,
   DescribeOptions,
   DescribeRegistrar,
   EachFn,
@@ -39,6 +41,8 @@ export interface GroupNode {
   readonly options: DescribeOptions;
   readonly parent: GroupNode | undefined;
   readonly serial: boolean;
+  /** The group's `parallel`, from its options or a `describe.configure()` call in its body. */
+  parallel: boolean | undefined;
 }
 
 /** How a test was registered; `fixme` is a skip from `test.fixme(title, fn)`, reported with its own cause. */
@@ -137,6 +141,8 @@ type HookDeclaration = Pick<RegisteredHook, 'kind' | 'fn' | 'fixtures'>;
 export interface ModuleRegistration {
   readonly tests: readonly RegisteredTest[];
   readonly hooks: readonly RegisteredHook[];
+  /** The file scope's `parallel`, set by a top-level `describe.configure()`. */
+  readonly parallel?: boolean | undefined;
 }
 
 const SESSION_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -147,6 +153,7 @@ class Collector {
   private currentGroup: GroupNode | undefined = undefined;
   private declarationCounter = 0;
   private closed = false;
+  private fileParallel: boolean | undefined = undefined;
   /** Real path of the module being collected, the file a test's source prefers. */
   private readonly moduleFile: string | undefined;
 
@@ -160,7 +167,7 @@ class Collector {
 
   close(): ModuleRegistration {
     this.closed = true;
-    return { tests: this.tests, hooks: this.hooks };
+    return { tests: this.tests, hooks: this.hooks, parallel: this.fileParallel };
   }
 
   /**
@@ -261,12 +268,14 @@ class Collector {
     if (typeof body !== 'function') throw new CollectionError('describe body must be a function');
     // The caller's own options are checked, not the copy that adds the mark, which keeps only enumerable keys.
     validateDescribeOptions(given, this.currentGroup, markFail);
+    checkParallel('describe options', given.parallel, given.serial === true, this.fileParallel, groupChain(this.currentGroup));
     const options = markFail ? { ...given, fail: true } : given;
     const group: GroupNode = {
       title: normalizedTitle,
       options,
       parent: this.currentGroup,
       serial: options.serial === true,
+      parallel: options.parallel,
     };
     const previous = this.currentGroup;
     this.currentGroup = group;
@@ -280,6 +289,24 @@ class Collector {
     } finally {
       this.currentGroup = previous;
     }
+  }
+
+  /** Sets `parallel` on the scope being registered: the enclosing group, or the file. */
+  configure(options: DescribeConfigureOptions): void {
+    const api = 'describe.configure()';
+    this.assertOpen(api);
+    if (typeof options !== 'object' || options === null) throw new CollectionError(`${api} takes an options object, e.g. { parallel: true }`);
+    if ('mode' in options) throw new CollectionError(`${api} takes no mode: use { parallel: true } for 'parallel', { parallel: false } for 'default', and describe(title, { serial: true }, fn) for 'serial'`);
+    const unknown = unknownKeyMessage(api, options, ['parallel']);
+    if (unknown !== undefined) throw new CollectionError(unknown);
+    const scope = this.currentGroup;
+    if (options.parallel === undefined) return;
+    if ((scope === undefined ? this.fileParallel : scope.parallel) !== undefined) {
+      throw new CollectionError(`${api}: parallel is already set for this scope`);
+    }
+    checkParallel(api, options.parallel, scope?.serial === true, this.fileParallel, groupChain(scope?.parent));
+    if (scope === undefined) this.fileParallel = options.parallel;
+    else scope.parallel = options.parallel;
   }
 
   registerHook(hook: HookDeclaration): void {
@@ -409,6 +436,7 @@ const DESCRIBE_OPTION_KEYS: readonly string[] = Object.keys({
   trace: true,
   video: true,
   serial: true,
+  parallel: true,
 } satisfies Record<keyof DescribeOptions, true>);
 
 /**
@@ -849,6 +877,7 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   };
   const describe: DescribeAPI = Object.assign(groupRegistrar('describe()', false), {
     fail: groupRegistrar('describe.fail()', true),
+    configure: (options: DescribeConfigureOptions): void => requireCollector('describe.configure()').configure(options),
   });
 
   const api: TestAPI = Object.assign(testFunction, {

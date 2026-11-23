@@ -913,6 +913,7 @@ describe('e2e --version and --help', () => {
       '--device',
       '--agent',
       '--workers',
+      '--fully-parallel',
       '--retries',
       '--action-timeout',
       '--assertion-timeout',

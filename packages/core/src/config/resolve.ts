@@ -120,6 +120,8 @@ export interface CacheStrictSource {
 export interface CliOverrides {
   retries?: number;
   workers?: number;
+  /** `--fully-parallel`: every target runs the tests of one file in parallel, over the config's and every target's `fullyParallel`. */
+  fullyParallel?: boolean;
   /** `--action-timeout <ms>`: the budget of every engine operation, over the config's `actionTimeout`. */
   actionTimeout?: number;
   /** `--assertion-timeout <ms>`: the default `expect` deadline, over the config's `assertionTimeout`. */
@@ -142,6 +144,15 @@ export interface CliOverrides {
   agents?: readonly string[];
 }
 
+/** A present value that is not a boolean is a config error naming the key. */
+function optionalBoolean(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ConfigurationError('INVALID_CONFIG', `${label} must be a boolean, got ${describeValue(value)}`);
+  }
+  return value;
+}
+
 const TOP_LEVEL_KEYS = new Set([
   'projectId',
   'targets',
@@ -156,6 +167,7 @@ const TOP_LEVEL_KEYS = new Set([
   'failOnSkippedFailure',
   'maxDuration',
   'workers',
+  'fullyParallel',
   'artifacts',
   'output',
   'trace',
@@ -245,10 +257,16 @@ export function resolveProjectConfig(
   }
 
   const recordings = runRecordings(raw, cli);
-  const targets = resolveTargets(raw.targets, options.projectRoot, (target, where) => ({
-    trace: targetRecording(recordings.trace, target.trace, `${where} trace`, 'trace'),
-    video: targetRecording(recordings.video, target.video, `${where} video`, 'video'),
-  }));
+  const fullyParallel = optionalBoolean(raw.fullyParallel, 'fullyParallel');
+  const targets = resolveTargets(raw.targets, options.projectRoot, (target, where) => {
+    // Read before the flag is consulted, so a broken value fails with or without it.
+    const own = optionalBoolean(target.fullyParallel, `${where} fullyParallel`);
+    return {
+      trace: targetRecording(recordings.trace, target.trace, `${where} trace`, 'trace'),
+      video: targetRecording(recordings.video, target.video, `${where} video`, 'video'),
+      fullyParallel: cli.fullyParallel ?? own ?? fullyParallel ?? false,
+    };
+  });
   const tests = normalizeTests(raw.tests, options.projectRoot);
 
   const timeout = timerMs(raw.timeout, 'timeout') ?? 120_000;
@@ -1005,7 +1023,9 @@ function computeConfigDigest(
   // enters the digest either; the built-in ids digest as they always have,
   // so adding a reporter to a config leaves its cache valid.
   // `failOnSkippedFailure` decides only the exit code, never what runs, and
-  // `maxDuration` only when the run stops. A test filter decides what runs
+  // `maxDuration` only when the run stops. `fullyParallel`, at the top or on
+  // a target, decides which worker runs a test, never what the test does.
+  // A test filter decides what runs
   // before any worker starts and never changes what a test does, so adding
   // one leaves the replays valid, like a reporter.
   // `targets` digest by declaration below and never enter the clone: an
@@ -1013,6 +1033,7 @@ function computeConfigDigest(
   const {
     failOnSkippedFailure: _failOnSkippedFailure,
     maxDuration: _maxDuration,
+    fullyParallel: _fullyParallel,
     filters: _filters,
     artifacts: _artifacts,
     output: _output,

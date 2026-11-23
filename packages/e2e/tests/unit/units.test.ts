@@ -6,6 +6,8 @@ import type {
   TestTargetPair,
 } from '../../src/collect/select.ts';
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { protocolEngine } from '@e2e-dev/core/lib/engine/protocol/client';
+import { defineEngine } from '@e2e-dev/core/lib/engine/index';
 import {
   buildWorkPlans,
   failureLimitSkip,
@@ -54,6 +56,7 @@ const target: ResolvedTarget = {
   declaredApp: EMPTY_DECLARED,
   trace: { mode: 'off', source: 'default' },
   video: { mode: 'off', source: 'default' },
+  fullyParallel: false,
 };
 
 function makeTest(
@@ -79,6 +82,7 @@ function makeTest(
     file,
     id: `test::${file}::${title}`,
     serialRoot: undefined,
+    parallel: { declared: false, ordered: undefined, suiteHooks: false },
     serialId: undefined,
     selected: true,
     ...overrides,
@@ -148,7 +152,7 @@ describe('buildWorkPlans', () => {
       uncollected: [],
     };
 
-    const plans = buildWorkPlans(selection, collection, '/project');
+    const plans = buildWorkPlans(selection, collection, '/project', 4);
     expect(plans).toHaveLength(1);
     const plan = plans[0]!;
     expect(plan.setupUnits).toHaveLength(1);
@@ -173,9 +177,93 @@ describe('buildWorkPlans', () => {
       unmatchedPositionals: [],
       uncollected: [],
     };
-    const plans = buildWorkPlans(selection, collection, '/project');
+    const plans = buildWorkPlans(selection, collection, '/project', 4);
     expect(plans[0]!.fileUnits).toHaveLength(0);
     expect(plans[0]!.immediate).toHaveLength(1);
+  });
+});
+
+describe('buildWorkPlans with parallel scopes', () => {
+  const FILE = 'tests/a.e2e.ts';
+  const inParallel = { declared: true, ordered: undefined, suiteHooks: false };
+
+  /** The units of one file holding `tests`, each unit as the titles it runs. */
+  function unitsOf(tests: readonly CollectedTest[], options: { workers?: number; target?: ResolvedTarget; pairs?: TestTargetPair[] } = {}): string[][] {
+    const on = options.target ?? target;
+    const pairs = options.pairs ?? tests.map((test) => makePair(test, { target: on }));
+    const collection: Collection = { files: [makeFile(FILE, [...tests])], tests: [...tests], nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target: on, pairs }] }, collection, '/project', options.workers ?? 4);
+    return plan!.fileUnits.map((unit) => unit.pairs.map((pair) => pair.test.title));
+  }
+
+  it('gives each test of a parallel scope its own unit and keeps the rest of the file in one', () => {
+    const tests = [
+      makeTest(FILE, 'plain 1', 0),
+      makeTest(FILE, 'parallel 1', 1, { parallel: inParallel }),
+      makeTest(FILE, 'plain 2', 2),
+      makeTest(FILE, 'parallel 2', 3, { parallel: inParallel }),
+    ];
+    expect(unitsOf(tests)).toEqual([['plain 1', 'plain 2'], ['parallel 1'], ['parallel 2']]);
+  });
+
+  it('gives every unit of a file its own id and its share of the pairs, the first the id a whole file has', () => {
+    const tests = [makeTest(FILE, 'plain', 0), makeTest(FILE, 'parallel 1', 1, { parallel: inParallel }), makeTest(FILE, 'parallel 2', 2, { parallel: inParallel })];
+    const pairs = tests.map((test) => makePair(test));
+    const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    expect(plan!.fileUnits.map((unit) => unit.id)).toEqual([`file::web::${FILE}`, `file::web::${FILE}::1`, `file::web::${FILE}::2`]);
+    expect(plan!.fileUnits.map((unit) => unit.share)).toEqual([1 / 3, 1 / 3, 1 / 3]);
+  });
+
+  it('splits every file of a fullyParallel target, and no file of another', () => {
+    const tests = [makeTest(FILE, 'one', 0), makeTest(FILE, 'two', 1)];
+    expect(unitsOf(tests, { target: { ...target, fullyParallel: true } })).toEqual([['one'], ['two']]);
+    expect(unitsOf(tests)).toEqual([['one', 'two']]);
+  });
+
+  it('keeps a file with parallel: false whole under fullyParallel', () => {
+    const whole = { declared: false, ordered: 'file', suiteHooks: false };
+    const tests = [makeTest(FILE, 'one', 0, { parallel: whole }), makeTest(FILE, 'two', 1, { parallel: whole })];
+    expect(unitsOf(tests, { target: { ...target, fullyParallel: true } })).toEqual([['one', 'two']]);
+  });
+
+  it('keeps a serial group and a parallel: false group in a parallel scope as one unit each', () => {
+    const serial = { declared: true, ordered: 'group-0', suiteHooks: false };
+    const ordered = { declared: true, ordered: 'group-1', suiteHooks: false };
+    const tests = [
+      makeTest(FILE, 'step 1', 0, { parallel: serial }),
+      makeTest(FILE, 'alone', 1, { parallel: inParallel }),
+      makeTest(FILE, 'step 2', 2, { parallel: serial }),
+      makeTest(FILE, 'ordered 1', 3, { parallel: ordered }),
+      makeTest(FILE, 'ordered 2', 4, { parallel: ordered }),
+    ];
+    expect(unitsOf(tests)).toEqual([['step 1', 'step 2'], ['alone'], ['ordered 1', 'ordered 2']]);
+  });
+
+  it('runs an ordered scope once per agent and repeat, each in a unit of its own', () => {
+    const serial = { declared: true, ordered: 'group-0', suiteHooks: false };
+    const tests = [makeTest(FILE, 'step 1', 0, { parallel: serial }), makeTest(FILE, 'step 2', 1, { parallel: serial })];
+    const pairs = [0, 1].flatMap((repeat) => tests.map((test) => makePair(test, { repeat })));
+    const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([
+      ['step 1@0', 'step 2@0'],
+      ['step 1@1', 'step 2@1'],
+    ]);
+  });
+
+  it('shares units between parallel tests with suite hooks, one unit for each worker', () => {
+    const hooked = { declared: true, ordered: undefined, suiteHooks: true };
+    const tests = Array.from({ length: 5 }, (_, index) => makeTest(FILE, `hooked ${index}`, index, { parallel: hooked }));
+    expect(unitsOf(tests, { workers: 2 })).toEqual([['hooked 0', 'hooked 1', 'hooked 2'], ['hooked 3', 'hooked 4']]);
+    expect(unitsOf(tests, { workers: 8 })).toEqual(tests.map((test) => [test.title]));
+  });
+
+  it('keeps the file whole when the target runs one worker', () => {
+    const tests = [makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })];
+    expect(unitsOf(tests, { workers: 1 })).toEqual([['one', 'two']]);
+    const single: ResolvedTarget = { ...target, engine: protocolEngine(defineEngine({ name: 'pool', version: '1.0.0', spiVersion: 1, workers: 1 })) };
+    expect(unitsOf(tests, { target: single })).toEqual([['one', 'two']]);
   });
 });
 
@@ -201,7 +289,7 @@ describe('orderWorkPlans', () => {
       unmatchedPositionals: [],
       uncollected: [],
     };
-    return buildWorkPlans({ pairs: perTarget.flatMap((entry) => entry.pairs), perTarget }, collection, '/project');
+    return buildWorkPlans({ pairs: perTarget.flatMap((entry) => entry.pairs), perTarget }, collection, '/project', 4);
   }
 
   /** The files of each plan in dispatch order, keyed by target. */

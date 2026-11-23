@@ -16,8 +16,10 @@ import type { AttemptRecord, ResultRecord, ResultStatus } from '@e2e-dev/core/li
 import type { WirePair } from './worker/protocol.ts';
 
 /**
- * One schedulable unit: either a single setup pair or every runnable ordinary
- * pair of one file for one target. Units execute on exactly one worker.
+ * One schedulable unit: either a single setup pair, or runnable ordinary
+ * pairs of one file for one target that run in order on one worker. That is
+ * every such pair of the file, unless some are in a parallel scope; see
+ * `splitFile`. Units execute on exactly one worker.
  */
 export interface WorkUnit {
   readonly id: string;
@@ -28,6 +30,8 @@ export interface WorkUnit {
   readonly absolutePath: string;
   /** Pairs with disposition `run`, in declaration order. */
   readonly pairs: readonly TestTargetPair[];
+  /** The part of its file's runnable pairs a file unit holds, from above 0 through 1; 1 for a setup unit. */
+  readonly share: number;
 }
 
 /** Per-target schedule: setup units gate file units. */
@@ -43,13 +47,19 @@ export interface TargetWorkPlan {
   readonly env?: Readonly<Record<string, string>>;
 }
 
-/** Builds per-target work plans from a selection, preserving report order. */
+/**
+ * Builds per-target work plans from a selection, preserving report order.
+ * `workers` is the run's worker cap: a target that can run several workers
+ * gets the tests of a parallel scope as units of their own.
+ */
 export function buildWorkPlans(
   selection: Selection,
   collection: Collection,
   projectRoot: string,
+  workers: number,
 ): TargetWorkPlan[] {
   return selection.perTarget.map(({ target, pairs }) => {
+    const parallelism = Math.min(workers, target.engine?.workers ?? workers);
     // One pass sorts every pair into its bucket; files are then visited in
     // collection order so unit order (and thus report order) is stable.
     const setupUnits: WorkUnit[] = [];
@@ -65,6 +75,7 @@ export function buildWorkPlans(
           file: pair.test.file,
           absolutePath: path.resolve(projectRoot, pair.test.file),
           pairs: [pair],
+          share: 1,
         });
       } else if (pair.disposition !== 'run') {
         immediate.push(pair);
@@ -79,18 +90,63 @@ export function buildWorkPlans(
     for (const file of collection.files) {
       const filePairs = runnableByFile.get(file.file);
       if (filePairs === undefined) continue;
-      fileUnits.push({
-        id: `file::${target.name}::${file.file}`,
-        kind: 'file',
-        targetName: target.name,
-        file: file.file,
-        absolutePath: file.absolutePath,
-        pairs: filePairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex),
-      });
+      const ordered = filePairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
+      const id = `file::${target.name}::${file.file}`;
+      for (const [index, unitPairs] of splitFile(ordered, target.fullyParallel, parallelism).entries()) {
+        fileUnits.push({
+          // A file that is one unit keeps the id it always had.
+          id: index === 0 ? id : `${id}::${index}`,
+          kind: 'file',
+          targetName: target.name,
+          file: file.file,
+          absolutePath: file.absolutePath,
+          pairs: unitPairs,
+          share: unitPairs.length / ordered.length,
+        });
+      }
     }
 
     return { target, setupUnits, fileUnits, immediate };
   });
+}
+
+/**
+ * Cuts one file's runnable pairs, in declaration order, into the units that
+ * run them, each unit's pairs in order on one worker. A pair in no parallel
+ * scope (a group or file with `parallel: true`, or every file under
+ * `fullyParallel`) stays in the file's one ordered unit, the first. In a
+ * parallel scope:
+ *
+ * - a serial group, or a scope with `parallel: false`, is one unit for each
+ *   agent and repeat it runs as;
+ * - a pair with no `beforeAll` or `afterAll` around it is a unit of its own;
+ * - the pairs with such hooks share as few units as keep `parallelism`
+ *   workers busy, since each unit runs the hooks again.
+ *
+ * With one worker nothing can run at the same time, so the file stays whole.
+ */
+function splitFile(pairs: readonly TestTargetPair[], fullyParallel: boolean, parallelism: number): TestTargetPair[][] {
+  if (parallelism <= 1) return [[...pairs]];
+  const inOrder: TestTargetPair[] = [];
+  const scopes = new Map<string, TestTargetPair[]>();
+  const alone: TestTargetPair[][] = [];
+  const hooked: TestTargetPair[] = [];
+  for (const pair of pairs) {
+    const { declared, ordered, suiteHooks } = pair.test.parallel;
+    if (!(declared || fullyParallel) || ordered === 'file') inOrder.push(pair);
+    else if (ordered !== undefined) {
+      const key = pairKey(ordered, pair.agent, pair.repeat);
+      const scope = scopes.get(key);
+      if (scope === undefined) scopes.set(key, [pair]);
+      else scope.push(pair);
+    } else if (suiteHooks) hooked.push(pair);
+    else alone.push([pair]);
+  }
+  const size = Math.ceil(hooked.length / parallelism);
+  const sharing: TestTargetPair[][] = [];
+  for (let start = 0; start < hooked.length; start += size) sharing.push(hooked.slice(start, start + size));
+  const split = [...scopes.values(), ...alone, ...sharing].toSorted((a, b) => a[0]!.test.declarationIndex - b[0]!.test.declarationIndex);
+  return inOrder.length === 0 ? split : [inOrder, ...split];
 }
 
 /** What `orderWorkPlans` ranks the work by. */
@@ -115,6 +171,8 @@ export function relevanceBand(score: number): number {
  * relevance band of the tests it runs, and within a band longest first by
  * the time the previous run spent in it, so a long file starts while short
  * ones fill the other workers instead of starting last and running alone.
+ * A unit that holds part of a file counts that part of the file's time, by
+ * its share of the pairs.
  * Files without a timing go first, being of unknown length; ties keep
  * collection order. A target ranks by its best file, ties keeping config
  * order. Report order does not depend on dispatch order.
@@ -125,7 +183,7 @@ export function orderWorkPlans(plans: readonly TargetWorkPlan[], { relevanceOf, 
       .map((unit) => ({
         unit,
         band: unit.pairs.reduce((best, pair) => Math.max(best, relevanceBand(relevanceOf(pair.test.id))), 0),
-        duration: durationOf(unit.targetName, unit.file) ?? Number.POSITIVE_INFINITY,
+        duration: (durationOf(unit.targetName, unit.file) ?? Number.POSITIVE_INFINITY) * unit.share,
       }))
       .toSorted((a, b) => {
         const longer = b.duration - a.duration;

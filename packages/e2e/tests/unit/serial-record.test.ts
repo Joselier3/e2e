@@ -81,6 +81,7 @@ function makeTarget(name: string, index: number): ResolvedTarget {
     },
     trace: { mode: 'off', source: 'default' },
     video: { mode: 'off', source: 'default' },
+    fullyParallel: false,
   };
 }
 
@@ -105,6 +106,7 @@ function serialPairs(target: ResolvedTarget): TestTargetPair[] {
       file,
       id: `${file}::${title}`,
       serialRoot: undefined,
+      parallel: { declared: false, ordered: undefined, suiteHooks: false },
       serialId: `${file}::wizard`,
       selected: true,
     };

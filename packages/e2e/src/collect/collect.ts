@@ -12,18 +12,22 @@ import { staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { declarationSite } from './fixture-errors.ts';
 import {
   collectModule,
+  groupChain,
   groupTitles,
   outermostSerialGroup,
   type GroupNode,
   type ModuleRegistration,
   type RegisteredTest,
 } from './registry.ts';
+import { parallelPlacements, type ParallelPlacement } from './parallel.ts';
 import type { SourceLocation } from '@e2e-dev/core/lib/internal/source';
 import type { TestIdentity } from '@e2e-dev/core/lib/run/records';
 
 export interface CollectedTest extends RegisteredTest, TestIdentity {
   /** Outermost serial group, when the test is a serial-group member. */
   readonly serialRoot: GroupNode | undefined;
+  /** Where the test sits among its file's parallel scopes; the planner reads it and no record carries it. */
+  readonly parallel: ParallelPlacement;
   /**
    * Whether the positionals selected this test (always, with none): its
    * file, and its declaration line when the file was named as `file:line`.
@@ -178,6 +182,7 @@ function toCollectedTests(
   lines: readonly number[] | undefined,
 ): CollectedTest[] {
   const seenTitlePaths = new Set<string>();
+  const placementOf = parallelPlacements(registration);
   return registration.tests.map((registered) => {
     const encoded = testId(file, registered.titlePath);
     if (seenTitlePaths.has(encoded)) {
@@ -192,6 +197,7 @@ function toCollectedTests(
       file,
       id: registered.kind === 'setup' ? setupTestId(file, registered.titlePath) : encoded,
       serialRoot,
+      parallel: placementOf(groupChain(registered.group)),
       serialId: serialRoot === undefined ? undefined : serialSourceId(file, serialRoot),
       selected:
         selected &&
