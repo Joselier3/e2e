@@ -79,16 +79,24 @@ describe('toBeInViewport', () => {
     });
   });
 
-  it('keeps waiting on a shown node the engine reports no box for, negated or not', async () => {
+  it('reads a shown node the engine reports no box for as outside the viewport', async () => {
+    await at('boxless').not.toBeInViewport(soon);
     await expect(at('boxless').toBeInViewport(soon)).rejects.toMatchObject({
-      message: expect.stringContaining('observed: no box'),
-    });
-    await expect(at('boxless').not.toBeInViewport(soon)).rejects.toMatchObject({
-      message: expect.stringContaining('observed: no box'),
+      message: expect.stringContaining('observed: no box (match count 1)'),
     });
   });
 
-  it.each([1.5, -0.1, Number.NaN, '0.5'])('refuses ratio %s before reading', (ratio) => {
+  it('passes ratio 1 for a box fully inside whose area rounds below 1', async () => {
+    const fractional: SemanticNode = {
+      ref: { id: 'fractional', revision: '' },
+      role: 'generic',
+      testId: 'fractional',
+      rect: { x: 20.2, y: 0, width: 5.1, height: 10 },
+    };
+    await expectFixture(createScreenFixture([fractional]).getByTestId('fractional')).toBeInViewport({ ratio: 1 });
+  });
+
+  it.each([1.5, -0.1, Number.NaN, '0.5', null])('refuses ratio %s before reading', (ratio) => {
     expect(() => at('inside').toBeInViewport(computed({ ratio }))).toThrow(
       expect.objectContaining({
         code: 'INVALID_ARGUMENT',

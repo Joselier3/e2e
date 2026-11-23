@@ -14,7 +14,7 @@ import {
   type TextPattern,
 } from '@e2e-dev/core/lib/internal/text';
 import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
-import { shareInViewport } from '@e2e-dev/core/lib/internal/geometry';
+import { boxShareInViewport } from '@e2e-dev/core/lib/internal/geometry';
 import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
 import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
@@ -377,26 +377,32 @@ class AsyncExpectationImpl implements AsyncExpectation {
   toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void> {
     const api = this.api('toBeInViewport');
     rejectUnknownOptions(api, options, ['ratio', 'timeout']);
-    const ratio = options?.ratio ?? 0;
+    const ratio = options?.ratio === undefined ? 0 : options.ratio;
     if (typeof ratio !== 'number' || !(ratio >= 0 && ratio <= 1)) {
       throw new TestError('INVALID_ARGUMENT', `${api} option ratio must be a number from 0 to 1`);
     }
 
-    const share = (sample: Sample): number =>
-      sample.viewport === undefined || sample.node?.rect === undefined ? 0 : shareInViewport(sample.node.rect, sample.viewport);
+    const share = (sample: Sample): number => {
+      if (sample.viewport === undefined || sample.node?.rect === undefined) return 0;
+      return boxShareInViewport(sample.node.rect, sample.viewport);
+    };
     return this.poll(
       {
         name: 'toBeInViewport',
         evaluableWithoutNode: true,
-        evaluableNode: (node) => !isNodeVisible(node) || node.rect !== undefined,
         readsViewport: true,
-        predicate: (sample) => share(sample) > 0 && share(sample) >= ratio,
+        // The tolerance Playwright allows, so a box fully inside whose area
+        // rounds below 1 still passes `ratio: 1`.
+        predicate: (sample) => {
+          const inside = share(sample);
+          return inside > 0 && inside > ratio - 1e-9;
+        },
         describeExpected: ratio === 0 ? 'in viewport' : `in viewport with ratio ${ratio}`,
         observed: (sample) => {
           if (sample.node === null) return 'no node';
           if (!isNodeVisible(sample.node)) return 'hidden';
           if (sample.node.rect === undefined) return 'no box';
-          return `viewport ratio ${Number(share(sample).toFixed(2))}`;
+          return `viewport ratio ${share(sample)}`;
         },
       },
       options?.timeout,
