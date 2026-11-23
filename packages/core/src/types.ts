@@ -1581,7 +1581,8 @@ export interface TargetApp {
 /**
  * One target: a named surface on one platform, served by an engine.
  * What the target can do is graded from the engine's declared capabilities;
- * with no `engine` the target is agent-tools-only and everything runs opaque.
+ * with no `engine` the target runs agent tools and `request` calls to
+ * absolute URLs, and everything runs opaque.
  * The app under test is the target's `app`; the engine only drives it.
  */
 export interface Target {

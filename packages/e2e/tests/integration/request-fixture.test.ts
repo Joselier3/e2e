@@ -89,6 +89,20 @@ let api: Api;
 beforeAll(async () => { api = await startApi(); });
 afterAll(async () => { await api.close(); });
 
+/** Every step `report.json` holds whose api is a `request` call, in order. */
+function reportedRequestSteps(report: unknown): { label: string }[] {
+  const found: { label: string }[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node === null || typeof node !== 'object') return;
+    const step = node as { api?: unknown; label?: unknown };
+    if (typeof step.api === 'string' && step.api.startsWith('request.') && typeof step.label === 'string') found.push({ label: step.label });
+    Object.values(node).forEach(walk);
+  };
+  walk(report);
+  return found;
+}
+
 /** One fake-engine target whose app is the API. */
 function onApi(extra: Partial<E2EConfig> = {}): Partial<E2EConfig> {
   return { targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine().engine, app: { url: api.url } }], ...extra };
@@ -244,6 +258,10 @@ test('an option request does not take', async ({ request }) => {
   await request.post('/api/refused-options', { data: { sku: 'A1' }, params: { id: '17' } } as never);
 });
 
+test('a content-length header', async ({ request }) => {
+  await request.post('/api/refused-options', { headers: { 'content-length': '1' } });
+});
+
 test('a host header', async ({ request }) => {
   await request.get('/api/refused-options', { headers: { Host: 'tenant-a.example.test' } });
 });
@@ -329,6 +347,7 @@ test('a bigint in json', async ({ request }) => {
     // V8's own message would quote the start of the body ("ok"), which can be part of a secret.
     expect(errorOf('a body that is not JSON')?.message).toBe('the response body of GET /api/ok is not valid JSON');
     expect(errorOf('a header value that is not a string')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "x-count" must be a string' });
+    expect(errorOf('a content-length header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "content-length" is set by fetch itself; leave it out' });
     expect(errorOf('a host header')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Host" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch sets itself')).toMatchObject({ code: 'INVALID_ARGUMENT', message: 'request: header "Sec-Fetch-Mode" is set by fetch itself; leave it out' });
     expect(errorOf('a header fetch refuses')).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('POST /api/refused-options: fetch refused the request: invalid transfer-encoding header') });
@@ -424,9 +443,11 @@ test('a long path', async ({ request }) => {
 });
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi() });
-    const [step] = resultByTitle(outcome, 'a long path').attempts[0]!.steps;
-    expect(step!.label).toHaveLength(8192);
-    expect(step!.label.endsWith('…')).toBe(true);
+    // The recorder keeps the whole label; report.json cuts it to what its schema admits.
+    expect(resultByTitle(outcome, 'a long path').attempts[0]!.steps[0]!.label).toHaveLength('GET /files/'.length + 9000);
+    const [reported] = reportedRequestSteps(outcome.report);
+    expect(reported!.label).toHaveLength(8192);
+    expect(reported!.label.endsWith('…')).toBe(true);
     assertValidReport(outcome.report);
     expect(api.paths).toContain('/files/' + 'x'.repeat(9000));
   });
@@ -442,8 +463,10 @@ test('a secret across the cut', async ({ request }) => {
 `;
     const { outcome } = await runProject({ 'tests/api.e2e.ts': file }, { config: onApi({ secrets: { TOKEN: secret } }) });
     const [step] = resultByTitle(outcome, 'a secret across the cut').attempts[0]!.steps;
-    expect(step!.label).toHaveLength(8192);
-    expect(step!.label).not.toContain(secret.slice(0, 10));
+    expect(step!.label.endsWith('<secret:TOKEN>')).toBe(true);
+    const [reported] = reportedRequestSteps(outcome.report);
+    expect(reported!.label).toHaveLength(8192);
+    expect(reported!.label).not.toContain(secret.slice(0, 10));
     expect(JSON.stringify(outcome.report)).not.toContain(secret.slice(0, 10));
   });
 

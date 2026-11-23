@@ -145,8 +145,8 @@ function methodOf(options: APIRequestFetchOptions | undefined): string {
 /** The methods Node's fetch refuses to send. */
 const UNSENDABLE_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
 
-/** The headers Node's fetch overwrites or drops, so the test would not send what it names. */
-const OVERWRITTEN_HEADERS = new Set(['host', 'sec-fetch-mode']);
+/** The headers Node's fetch sets, overwrites, or drops, so the test would not send what it names. */
+const OVERWRITTEN_HEADERS = new Set(['content-length', 'host', 'sec-fetch-mode']);
 
 /** Undici's codes for a request it refuses to send, as opposed to a network failure. */
 const REFUSED_REQUEST_CODES = new Set(['UND_ERR_INVALID_ARG', 'UND_ERR_NOT_SUPPORTED', 'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH']);
