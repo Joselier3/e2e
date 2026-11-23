@@ -319,7 +319,8 @@ Each action resolves one node, waits up to `config.actionTimeout` (30 s, or
 `selectOption(label | { label } | { value } | { index })` (one option; an
 array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover()`, `setInputFiles(files)`
 (paths relative to the project root, or `{ name, mimeType, buffer: Buffer }` payloads, singly or as an array; `[]` clears; a missing path, or one under a directory the runner cannot search, is `INVALID_ARGUMENT`), `dragTo(locator)`, `scrollIntoView()`,
-`swipe({ direction, momentum? })`. Web only, `UNSUPPORTED_CAPABILITY` on a
+`swipe({ direction, momentum? })` or `swipe({ from, to, duration? })` (a
+drag on the node's box, which turns a pager a wheel leaves alone). Web only, `UNSUPPORTED_CAPABILITY` on a
 device: `blur`, `secondaryTap`, `selectOption`, `setInputFiles`, `scrollIntoView`,
 and `modifiers`.
 
@@ -335,7 +336,9 @@ Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 `screen.swipe({ from, to, duration? })` swipes along a path,
 `screen.swipe({ direction, momentum? })` swipes the viewport. Viewport
 points also take percentages from `'0%'` through `'100%'`, rounded to the
-nearest pixel: `{ x: '50%', y: '50%' }`. Prefer a locator; a point moves with
+nearest pixel: `{ x: '50%', y: '50%' }`. `locator.swipe({ from, to })`
+takes the same forms on the node's box: pixels from its top-left corner,
+percentages of its size. Prefer a locator; a point moves with
 the layout.
 
 ### Reads

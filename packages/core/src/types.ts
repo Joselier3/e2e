@@ -522,7 +522,13 @@ export interface SwipeOptions {
   duration?: never;
 }
 
-/** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
+/**
+ * A swipe along a path between two points: a touch swipe on a device, a
+ * pointer drag on a document platform. On `screen` the points are on the
+ * viewport. On a locator they are on the node's box: pixels from its
+ * top-left corner, as `tap({ position })` takes them, and percentages of its
+ * width (`x`) or height (`y`).
+ */
 export interface SwipePathOptions {
   /** Where the finger goes down. */
   from: ScreenPoint;
@@ -627,8 +633,12 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   dragTo(target: Locator, options?: ActionOptions): Promise<void>;
   /** Scrolls exactly one node into view. */
   scrollIntoView(options?: ActionOptions): Promise<void>;
-  /** Performs a swipe scoped to exactly one node. */
-  swipe(options: SwipeOptions & ActionOptions): Promise<void>;
+  /**
+   * Performs a swipe scoped to exactly one node: in a direction, or along a
+   * path between two points of its box once it is in view, which drags a
+   * pager that a wheel event leaves alone.
+   */
+  swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void>;
   /** Reads normalized text once a match exists, without retrying for a particular value. */
   textContent(): Promise<string | null>;
   /** Reads the current input value; throws `ACTION_FAILED` on a node with no value, such as a heading. */

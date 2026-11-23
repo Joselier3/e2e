@@ -594,7 +594,25 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('scrollIntoView', { kind: 'scrollIntoView' }, options);
   }
 
-  override swipe(options: SwipeOptions & ActionOptions): Promise<void> {
+  override swipe(options: (SwipeOptions | SwipePathOptions) & ActionOptions): Promise<void> {
+    if (isSwipePath(options)) {
+      rejectUnknownOptions('swipe', options, ['from', 'to', 'duration', 'timeout']);
+      const from = requireScreenPoint(options.from, 'swipe from');
+      const to = requireScreenPoint(options.to, 'swipe to');
+      const durationMs = validateSwipeDuration(options.duration);
+      return this.context.steps.run(
+        'locator',
+        'locator.swipe',
+        `${this.label} ${describePoint(from)} → ${describePoint(to)}`,
+        () =>
+          this.context.engine.performWithin(
+            this.expression,
+            from,
+            obj({ kind: 'swipeTo' as const, target: to, durationMs }),
+            options.timeout,
+          ),
+      );
+    }
     rejectUnknownOptions('swipe', options, ['direction', 'momentum', 'timeout']);
     return this.action('locator.swipe', () =>
       this.context.engine.perform(

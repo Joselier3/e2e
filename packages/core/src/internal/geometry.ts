@@ -86,6 +86,19 @@ function resolveCoordinate(value: ScreenCoordinate, size: number): number {
   return clamp(Math.round((Number.parseFloat(value) / 100) * size), 0, Math.max(0, size - 1));
 }
 
+/**
+ * Resolves a point a test names on a node's box to viewport CSS pixels: pixels
+ * are an offset from `origin`, the point `tap({ position })` measures from, and
+ * a percentage is that share of the box's width (x) or height (y) from its
+ * top-left corner, kept on its last pixel as on the viewport.
+ */
+export function resolveBoxPoint(point: ScreenPoint, box: Box, origin: ViewportPoint): ViewportPoint {
+  return {
+    x: typeof point.x === 'number' ? origin.x + point.x : box.x + resolveCoordinate(point.x, box.width),
+    y: typeof point.y === 'number' ? origin.y + point.y : box.y + resolveCoordinate(point.y, box.height),
+  };
+}
+
 /** True when the point lies inside the box: on its top and left edges, short of its bottom and right ones. */
 export function containsPoint(box: Box, point: ViewportPoint): boolean {
   return point.x >= box.x && point.x < box.x + box.width && point.y >= box.y && point.y < box.y + box.height;
