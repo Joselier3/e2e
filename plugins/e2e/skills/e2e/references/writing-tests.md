@@ -25,18 +25,17 @@ test.describe('todos', { tags: ['todos'] }, () => {
     await app.open('/todos');
   });
 
-  const labels = { add: 'Add', remaining: 'Remaining' };
+  const labels = { list: 'Todos', remaining: 'Remaining' };
   const title = 'Write the release notes';
   const other = 'Book the venue';
   const addTodo = 'Add a todo named {title}';
-  const completeTodo = 'Mark {title} as done';
-  const verifyAddedTodo = 'There is one todo, {title}. It is unchecked and the list shows 1 remaining.';
 
   test('adds a todo to the list', async ({ agent, screen }) => {
     await agent.act(addTodo, { params: { title } });
-    await screen.getByRole('checkbox', title).waitFor();
 
-    await agent.assert(verifyAddedTodo, { params: { title } });
+    await expect(screen.getByRole('checkbox', title)).not.toBeChecked();
+    await expect(screen.getByRole('list', labels.list).getByRole('listitem')).toHaveCount(1);
+    await expect(screen.getByRole('status', labels.remaining)).toHaveText('1 remaining');
   });
 
   test('marks a todo as done', async ({ agent, screen }) => {
@@ -45,7 +44,8 @@ test.describe('todos', { tags: ['todos'] }, () => {
     await agent.act(addTodo, { params: { title } });
     await todo.waitFor();
 
-    await agent.act(completeTodo, { params: { title } }); // select the second todo
+    // the second todo shown: this list adds new todos at the end
+    await agent.act('Mark {title} as done', { params: { title } });
 
     await expect(todo).toBeChecked();
     await expect(screen.getByRole('checkbox', other)).not.toBeChecked();
@@ -54,9 +54,9 @@ test.describe('todos', { tags: ['todos'] }, () => {
 
   test('ignores an empty submission', async ({ screen }) => {
     // An exact interaction: the empty submit is the point of the test.
-    await screen.getByRole('button', labels.add).tap();
+    await screen.getByRole('button', 'Add').tap();
 
-    await expect(screen.getByRole('list', 'Todos').getByRole('listitem')).toHaveCount(0);
+    await expect(screen.getByRole('list', labels.list).getByRole('listitem')).toHaveCount(0);
   });
 });
 ```
@@ -108,7 +108,7 @@ themselves failed or the app changed under them.
     nothing after them. In a test body, no check sits in arrange or act.
     A state the test needs before it can go on is a wait on a locator
     narrowed to that state, such as
-    `balance.filter({ hasText: '$10.00' }).waitFor()`,
+    `balance.filter({ hasText: /^\$10\.00$/ }).waitFor()`,
     `screen.getByRole('switch', 'Lock card', { checked: true }).waitFor()`,
     or `heading.waitFor({ state: 'hidden' })`. A failed wait reports
     `LOCATOR_NOT_FOUND` and a failed check `ASSERTION_FAILED`, so the
@@ -148,7 +148,8 @@ themselves failed or the app changed under them.
 - **Act on the second item shown, never the first.** When a test removes,
   edits, renames, completes, or toggles one item of a list (a row, a line,
   a card), its arrange block adds two items, and its act picks the second
-  item the list shows. Its assert block then checks that the first item is
+  item the list shows. In a list that shows the newest item first, that is
+  the item added first. Its assert block then checks that the first item is
   still there, unchanged. The first item is the easy pick and the wrong
   one: an app that always changes the first row passes a test that acts on
   the first row.
@@ -159,7 +160,8 @@ themselves failed or the app changed under them.
   await agent.act(addTodo, { params: { title } });
   await screen.getByRole('button', `Delete ${other}`).tap();
 
-  // Good: deletes the second todo, then checks the first one is still there.
+  // Good: deletes the second todo (this list adds new todos at the end),
+  // then checks the first one is still there.
   await agent.act(addTodo, { params: { title: other } });
   await agent.act(addTodo, { params: { title } });
   await screen.getByRole('button', `Delete ${title}`).tap();
@@ -183,9 +185,10 @@ themselves failed or the app changed under them.
 - **Own every record the test needs.** A fixture can create a target and a
   similar neighbor for each test using the same setup code. Keep their
   returned IDs and original values. After acting, use fresh reads to check
-  the target's change and the neighbor's unchanged fields. Register each
-  created record for cleanup as soon as you have its ID, so setup errors
-  and failed assertions leave no records behind.
+  the target's change and the neighbor's unchanged fields. Wrap the
+  creation and `use()` in `try`/`finally` and delete every record created
+  so far in the `finally`, so a setup error after the first record and a
+  failed assertion leave no records behind.
 - **Prove a refusal leaves state unchanged.** A refusal message can
   accompany a write. If the requirement promises a visible refusal and
   no persisted change, check each explicitly. End the message test on
@@ -227,9 +230,10 @@ themselves failed or the app changed under them.
   teardown. `serial: true` is for a journey whose steps are meant to
   chain, not a fix for a test that fails alone. Any one test passes when
   you run it alone, by `file:line`, twice in a row.
-- **Put fixed selectors and text above the tests.** Inside the shared
-  `describe`, define stable selector inputs, test values, and prompt text
-  in plain objects or constants. In a hook or test, bind those inputs to
+- **Name what the tests repeat.** Inside the shared `describe`, define a
+  selector input, test value, or prompt text that more than one step or
+  test uses in a plain object or constant, and keep a single-use one
+  inline. In a hook or test, bind those inputs to
   the current `screen` fixture. Keep selectors that need runtime data,
   such as a fixture record ID, close to that data. Bind a repeated locator
   to a local `const`. As the spec grows or another spec needs the same
@@ -763,7 +767,7 @@ describe('project settings', { session: 'admin' }, () => {
 
     await screen.getByLabel('Name').fill('Atlas');
     await screen.getByRole('button', 'Save').tap();
-    await screen.getByRole('status').filter({ hasText: 'Saved' }).waitFor();
+    await screen.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor();
     await app.open(`/projects/${project.id}/settings`); // reopened: the promise is that it is saved
 
     await expect(screen.getByLabel('Name')).toHaveValue('Atlas');

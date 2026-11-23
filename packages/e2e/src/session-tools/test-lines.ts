@@ -220,7 +220,7 @@ export class SessionTestLines {
       testRan === undefined
         ? [
             `Draft test body from this session's actions, ${count}:`,
-            `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing. See topic writing-tests, Structure.`,
+            `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Use agent.act for a long path that can vary, with agent among the test fixtures. Give the agent the steps for one test goal, and split the path into calls only when a later step needs an intermediate screen state. Wait for that state before continuing. See topic writing-tests, Structure.`,
           ]
         : [
             `Test lines from this session's actions after test ${testRan} stopped, ${count}:`,

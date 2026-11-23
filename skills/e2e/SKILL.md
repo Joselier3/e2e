@@ -140,8 +140,9 @@ describe('billing', () => {
    it offers a clearer signal. Scope collection checks to the named list or
    table. For a complete collection check, compare all records and their
    counts, sorting copies only when order can vary.
-   Put stable selectors, fixed values, and
-   prompt text inside the shared `describe`, above its tests. As the spec
+   Put the selectors, fixed values, and prompt
+   text the tests repeat inside the shared `describe`, above its tests,
+   and keep a single-use one inline. As the spec
    grows, move those definitions to a feature-local TypeScript file and
    import them. Keep selectors that need test data close to the data.
    Use fixtures for data and cleanup (topic `writing-tests`). Check an end value
@@ -154,8 +155,8 @@ describe('billing', () => {
    data a test changes is created and deleted in a fixture, and a test
    never skips or branches on what the app shows.
 4. Check every test that removes, edits, or toggles one item of a list:
-   its arrange block adds two items, it acts on the second item shown,
-   never the first, and it checks that the first item is unchanged. An
+   its arrange block adds two items, it acts on the second item shown
+   (in a newest-first list, the item added first), never the first, and it checks that the first item is unchanged. An
    app that always changes the first row passes a test that acts on the
    first row.
 5. Run only the test you are working on:
@@ -282,7 +283,7 @@ lines you changed:
   the second adding its todo in its arrange block. A message the test
   moves past, such as `Saved` before it reopens the record or a
   confirmation before it opens another page, is a wait in the act block,
-  `screen.getByRole('status').filter({ hasText: 'Saved' }).waitFor()`,
+  `screen.getByRole('status').filter({ hasText: /^Saved$/ }).waitFor()`,
   not an `expect`. Every check reads the screen the test ends on.
 - A test that acts on one item of a list acts on the second item shown,
   never the first, after adding two, and checks the first item is

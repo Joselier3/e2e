@@ -235,7 +235,7 @@ verify one area after another.
        await agent.act('add "Dune" to the cart');
        await agent.waitFor('you are signed in and the cart holds "Neuromancer" and "Dune"');
 
-       await agent.act('set the quantity of "Dune" in the cart to 2'); // the second line, not the first
+       await agent.act('set the quantity of "Dune" in the cart to 2'); // the second line shown (lines stay in the order added), not the first
 
        await agent.assert('the cart line for "Dune" totals twice its unit price, and "Neuromancer" still has quantity 1');
        await expect(dune).toContainText('$25.00'); // Dune is $12.50 a copy
