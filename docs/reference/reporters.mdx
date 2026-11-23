@@ -224,12 +224,14 @@ reporters: ['list', 'ctrf'],
 - Run errors, such as a failed `afterAll`, go in `results.errors` and never
   count as a test. A tool that counts failed tests alone reads such a run as
   green, so [gate the job](/ci#gate-pull-requests) on the exit code.
-- Attachments link screenshots and videos by URL, or by path from the
-  project root (`$CI_PROJECT_DIR` when set). A file outside it, and every
-  download, is left out. A test in a serial group lists only its own files,
-  plus files of the group, such as its video, that belong to no single
-  test. Files of a cut retry, or of a group attempt no test ran in, are in
-  `report.json` only.
+- Attachments link screenshots, videos, and logs, such as the screen at a
+  failure, by the hosted URL, else by the artifact store's `http(s)`
+  reference, else by path from the project root (`$CI_PROJECT_DIR` when
+  set). A file outside it, and every download, is left out. A test in a
+  serial group lists only its own files, plus files of the group, such as
+  its video, that belong to no single test. A video of a second session a
+  test opened with `launch()` counts as the group's. Files of a cut retry,
+  or of a group attempt no test ran in, are in `report.json` only.
 - Every text copied from the report passes the run's secret redaction
   again. A link the redaction would change is left out.
 - Data CTRF has no field for, such as each step's e2e status and the run's

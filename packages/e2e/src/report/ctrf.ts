@@ -309,8 +309,9 @@ function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       ? clean(skippedMessage(result))
       : result.status === 'interrupted'
         ? clean(`interrupted: ${view.final.error?.message ?? 'the run was stopped'}`)
-        : status === 'failed' && error !== undefined
-          ? clean(error.message)
+        : status === 'failed'
+          ? // A result with no error of its own (a test that vanished before it ran) says its status, as `junit` does.
+            clean(error?.message ?? result.status)
           : undefined;
   const files = represented === undefined ? [] : attachments(represented, options, clean);
   const steps = represented?.steps ?? [];

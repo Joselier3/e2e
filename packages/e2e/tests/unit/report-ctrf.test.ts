@@ -219,6 +219,12 @@ describe('renderCtrfReport', () => {
     expect(JSON.stringify(document.results.environment)).not.toContain('darwin');
   });
 
+  it('says failed for a failed result with no attempt or error of its own, as junit does', () => {
+    const [test] = tests(doc({ results: [reportResult({ status: 'failed', attempts: [] })] }));
+    expect(test).toMatchObject({ status: 'failed', message: 'failed', duration: 0 });
+    expect(test).not.toHaveProperty('trace');
+  });
+
   it('marks a pass under test.fail with the expected failure it covered', () => {
     const attempt = reportAttempt({ expectedFailure: { reason: 'known bug', error: reportError({ code: 'ASSERTION_FAILED', message: 'still broken' }) } });
     const [test] = tests(doc({ results: [reportResult({ attempts: [attempt] })] }));
@@ -499,6 +505,14 @@ describe('renderCtrfReport', () => {
       const [, pays] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['failed', 'failed']) }));
       expect(pays).toMatchObject({ status: 'failed', attemptId: 'test-2-member', message: 'card declined' });
       expect(pays).not.toHaveProperty('extra');
+    });
+
+    it('keeps the attempt of a member that skipped itself, which ran', () => {
+      const skip = { cause: 'explicit' as const, reason: 'not on this plan' };
+      const attempt = groupAttempt('group-attempt-1', [member('test-1'), member('test-2', { status: 'skipped', durationMs: 7, skip, steps: [reportStep({ id: 'pays-step' })] })]);
+      const serial = group([attempt], 'passed');
+      const [, pays] = tests(doc({ serialGroups: [serial], results: memberResults(serial, ['passed', 'skipped'], skip) }));
+      expect(pays).toMatchObject({ status: 'skipped', attemptId: 'test-2-member', duration: 7, start: Date.parse(AT), message: 'not on this plan', steps: [expect.objectContaining({ status: 'passed' })] });
     });
 
     it('counts a member flaky from its own records in a group that failed', () => {
