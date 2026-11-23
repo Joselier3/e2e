@@ -344,7 +344,12 @@ describe('renderCtrfReport', () => {
         status: 'flaky',
         attempts: [
           reportAttempt({ id: `attempt-${S}`, status: 'failed', steps: [step], error: reportError({ code: `CODE_${S}`, message: `saw ${S}` }), artifacts: [artifact(`shot-${S}`, { url: 'https://store.example/plain', mediaType: `image/${S}` }), artifact('hosted', { url: `https://store.example/${S}` }), artifact('shot-local')] }),
-          reportAttempt({ id: 'attempt-2', index: 1, expectedFailure: { reason: `known ${S}`, error: reportError({ code: `CODE_${S}`, message: `still ${S}` }) } }),
+          reportAttempt({
+            id: `attempt-2-${S}`,
+            index: 1,
+            expectedFailure: { reason: `known ${S}`, error: reportError({ code: `CODE_${S}`, message: `still ${S}` }) },
+            artifacts: [artifact(`final-${S}`, { url: 'https://store.example/final', mediaType: `video/${S}` }), artifact('final-hosted', { url: `https://store.example/final-${S}` })],
+          }),
         ],
       });
       const skipped = reportResult({ id: 'result-2', status: 'skipped', skip: { cause: 'filtered', reason: `reason ${S}`, filter: `filter-${S}` }, selected: false, attempts: [] });
@@ -353,7 +358,7 @@ describe('renderCtrfReport', () => {
       const document = render(
         doc({
           runner: { name: 'e2e', version: `1.0.0-${S}` },
-          vcs: { commit: 'a'.repeat(40), branch: `branch-${S}` },
+          vcs: { commit: `${'a'.repeat(40)}${S}`, branch: `branch-${S}` },
           environment: { ci: false, trustNoticeShown: false, os: `os-${S} release-${S}`, arch: 'x64', runtime: 'node' },
           errors: [reportError({ code: `RUN_${S}`, message: `run ${S}`, phase: 'afterAll' })],
           results: [failed, skipped, stopped, broken],
@@ -363,14 +368,17 @@ describe('renderCtrfReport', () => {
       const text = JSON.stringify(document);
       expect(text).not.toContain(S);
       // One marker per planted text that reaches the file: a field that skipped the redaction changes the count.
-      expect(text.split('<secret:probe>').length - 1).toBe(42);
+      expect(text.split('<secret:probe>').length - 1).toBe(46);
       const brokenTest = (document.results.tests as Json[]).find((test) => test.testId === 'result-4')!;
       expect(brokenTest).toMatchObject({
         message: 'failed <secret:probe>',
         trace: 'CODE_<secret:probe> on actor-<secret:probe>: failed <secret:probe>',
         steps: [{ name: 'api.<secret:probe> label <secret:probe>', extra: { [KEY]: { actor: 'actor-<secret:probe>', code: 'CODE_<secret:probe>', explanation: 'why <secret:probe>' } } }],
       });
-      expect(document.results.tests[0].attachments ?? []).toEqual([]);
+      // The test object's own attempt: its id, the attachment name and media type are redacted, and a link holding the value is left out.
+      expect(document.results.tests[0]).toMatchObject({ attemptId: 'attempt-2-<secret:probe>' });
+      expect(document.results.tests[0].attachments).toEqual([expect.objectContaining({ name: 'screenshot-final-<secret:probe>', contentType: 'video/<secret:probe>', path: 'https://store.example/final' })]);
+      expect(document.results.environment.commit).toBe(`${'a'.repeat(40)}<secret:probe>`);
       // A link that holds the value is left out, hosted or local; a name that holds it is redacted.
       expect(document.results.tests[0].retryAttempts[0].attachments).toEqual([expect.objectContaining({ name: 'screenshot-shot-<secret:probe>', path: 'https://store.example/plain' })]);
     });
