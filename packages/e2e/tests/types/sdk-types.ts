@@ -17,6 +17,8 @@ import {
   type ActionEvent,
   type ActionName,
   type Agent,
+  type APIRequest,
+  type APIResponse,
   type App,
   type ArtifactStore,
   type AsyncExpectation,
@@ -1213,6 +1215,31 @@ void (expect(await readBody()).toMatchSchema(userSchema) satisfies { id: number 
 void (expect.soft(await readBody()).toMatchSchema(userSchema) satisfies { id: number } | undefined);
 void (expect(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number });
 void (expect.soft(JSON.parse('{}')).toMatchSchema(userSchema) satisfies { id: number } | undefined);
+
+// request: each call returns a response with its body read; expect(response) holds toBeOK only.
+test('request', async ({ request }) => {
+  void (request satisfies APIRequest);
+  const created = await request.post('/api/orders', { json: { sku: 'A1' }, headers: { authorization: 'Bearer t' } });
+  void (created satisfies APIResponse);
+  void (created.status satisfies number);
+  void ((await created.json<{ id: number }>()).id satisfies number);
+  void (expect(await created.json()).toMatchSchema(userSchema) satisfies { id: number });
+  expect(created).toBeOK();
+  expect(created).not.toBeOK();
+  expect.soft(created).toBeOK();
+  expect(created.status).toBe(201);
+  await request.fetch('/api/orders', { method: 'PUT', body: 'raw' });
+  // @ts-expect-error toBeOK is a matcher of a response, not of any value
+  expect(created.status).toBeOK();
+  // @ts-expect-error the value matchers take the response's fields, not the response
+  expect(created).toBe(created);
+  // @ts-expect-error the method goes in request.fetch's options, not a shorthand's
+  await request.get('/api/orders', { method: 'POST' });
+  // @ts-expect-error a body is a string; an object goes in json
+  await request.post('/api/orders', { body: { sku: 'A1' } });
+});
+// @ts-expect-error request is a test fixture, so a worker fixture cannot name it
+test.extend<{}, { seeded: number }>({ seeded: [async ({ request }, use) => { void request; await use(1); }, { scope: 'worker' }] });
 // @ts-expect-error A function isn't inferred from a return-only generic.
 void expect(await readBody()).toPass();
 

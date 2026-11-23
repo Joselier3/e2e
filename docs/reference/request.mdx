@@ -1,0 +1,216 @@
+---
+title: request
+description: The HTTP fixture: calls from a test, each one a step in the report.
+---
+
+The `request` fixture sends HTTP requests from a test. A path resolves
+against the target's app URL. Each call is a step in the report, and it
+ends when the whole response body is read.
+
+```ts title="tests/orders.e2e.ts"
+import { expect, test } from 'e2e';
+
+test('creates an order', async ({ request }) => {
+  const created = await request.post('/api/orders', { json: { sku: 'A1' } });
+  expect(created).toBeOK();
+  expect(await created.json()).toMatchObject({ sku: 'A1' });
+});
+```
+
+## Reference
+
+| Method | Returns |
+| --- | --- |
+| [`fetch`](#fetch) | `Promise<APIResponse>` |
+| [`get`](#shorthands) | `Promise<APIResponse>` |
+| [`post`](#shorthands) | `Promise<APIResponse>` |
+| [`put`](#shorthands) | `Promise<APIResponse>` |
+| [`patch`](#shorthands) | `Promise<APIResponse>` |
+| [`delete`](#shorthands) | `Promise<APIResponse>` |
+| [`head`](#shorthands) | `Promise<APIResponse>` |
+
+Every method takes a URL and [options](#options), and returns an
+[`APIResponse`](#apiresponse).
+
+### `fetch`
+
+Sends a request with the method in `options.method`, `GET` by default.
+
+```ts
+const removed = await request.fetch('/api/orders/7', { method: 'DELETE' });
+```
+
+The method is any HTTP method name. e2e sends it upper-cased.
+
+### Shorthands
+
+`get`, `post`, `put`, `patch`, `delete`, and `head` send a request with
+their method.
+
+```ts
+const found = await request.get('/api/orders?reference=r1');
+```
+
+A `GET` or `HEAD` request takes no body.
+
+### Options
+
+| Option | Type | Default |
+| --- | --- | --- |
+| `headers` | `Record<string, string>` | - |
+| `json` | `unknown` | - |
+| `body` | `string` | - |
+| `method` | `string` | `'GET'` |
+
+- `json` is sent through `JSON.stringify`, with
+  `content-type: application/json` unless `headers` sets a content type.
+- `body` is sent as is. Pass `json` or `body`, not both.
+- `method` is an option of `fetch` only.
+
+### `APIResponse`
+
+The response, with its body already read.
+
+| Member | Type |
+| --- | --- |
+| `status` | `number` |
+| `statusText` | `string` |
+| `ok` | `boolean` |
+| `url` | `string` |
+| `headers` | `Record<string, string>` |
+| `text()` | `Promise<string>` |
+| `json<T>()` | `Promise<T>` |
+
+- `ok` is true for a 2xx status.
+- `url` is the URL after redirects. Redirects are followed.
+- `headers` has lower-cased names. Several `set-cookie` values are joined
+  with `\n`.
+- `text()` decodes the body as UTF-8. `json()` parses it.
+
+### `toBeOK`
+
+`expect(response).toBeOK()` requires a 2xx status.
+`expect(response).not.toBeOK()` requires any other status.
+
+```ts
+expect(await request.get('/api/health')).toBeOK();
+expect(await request.get('/api/orders/unknown')).not.toBeOK();
+```
+
+The failure names the call and the status:
+`expected GET /api/health to be OK (a 2xx status), got 503 Service Unavailable`.
+`expect.soft` works the same way. The other matchers take a field of the
+response: `expect(response.status).toBe(201)`.
+
+## URLs
+
+A path such as `/api/orders` resolves against the target's `app.url`, the
+same base as [`app.baseUrl`](/reference/app#baseurl). An absolute `http` or
+`https` URL goes where it names, on any target.
+
+| Throws | When |
+| --- | --- |
+| `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
+| `POLICY_DENIED` | The URL has a scheme other than `http` or `https`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string, an option has the wrong type, `json` and `body` are both set, or a `GET` or `HEAD` request has a body. |
+
+## Steps and timeouts
+
+Each call is a step of kind `resource`, labeled with the method and the
+path: `POST /api/orders`. The label leaves out the query string. A path on
+another origin shows the origin too.
+
+A call is bounded by `actionTimeout` (default 30000 ms) and by the budget of
+the code that makes it: the test timeout in a test body, the cleanup timeout
+in an `afterEach` hook. When either runs out, e2e aborts the request. A
+test that runs out of time fails with its usual timeout error.
+
+| Throws | When |
+| --- | --- |
+| `ACTION_FAILED` | The call ran past `actionTimeout`, or the network failed: the server refused the connection, or the host does not resolve. |
+
+A call is not retried. To retry a read, wrap it in
+[`expect.poll`](/reference/expect#polling-a-value).
+
+## Cookies and scope
+
+`request` does not send the browser's cookies, and it keeps no cookies
+between calls. Pass a session cookie or a token in `headers`, as
+[Signed-in requests](/api-testing#signed-in-requests) shows.
+
+`request` is a test fixture. Test bodies, `beforeEach`, and `afterEach` get
+it. `beforeAll`, `afterAll`, and worker fixtures do not.
+
+## Types
+
+```ts
+export interface APIRequest {
+  /** Sends a request with `options.method`, GET by default. */
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<APIResponse>;
+  /** Sends a GET request. */
+  get(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a POST request. */
+  post(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a PUT request. */
+  put(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a PATCH request. */
+  patch(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a DELETE request. */
+  delete(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a HEAD request. */
+  head(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+}
+
+/** What one `request` call sends beside its URL. */
+export interface APIRequestOptions {
+  /** Request headers. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** A body sent as JSON, with `content-type: application/json` unless `headers` sets one. Not with `body`. */
+  readonly json?: unknown;
+  /** A body sent as is. Not with `json`. */
+  readonly body?: string;
+}
+
+/** `request.fetch` options: the method beside the rest. */
+export interface APIRequestFetchOptions extends APIRequestOptions {
+  /** The HTTP method; GET by default. */
+  readonly method?: string;
+}
+
+/** A `request` call's response, its body already read. `expect(response).toBeOK()` checks its status. */
+export interface APIResponse extends Expectable<APIResponseExpectation> {
+  /** The URL the response came from, after redirects. */
+  readonly url: string;
+  /** The HTTP status code. */
+  readonly status: number;
+  /** The HTTP status text. */
+  readonly statusText: string;
+  /** Whether the status is 2xx. */
+  readonly ok: boolean;
+  /** Response headers, lower-cased names; several `set-cookie` values are joined with `\n`. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** The body as UTF-8 text. */
+  text(): Promise<string>;
+  /** The body parsed as JSON. */
+  json<T = unknown>(): Promise<T>;
+}
+
+/** `expect(response)` for a `request` response. */
+export interface APIResponseExpectation {
+  /** Inverts the matcher. */
+  readonly not: { toBeOK(): void };
+  /** Requires a 2xx status. */
+  toBeOK(): void;
+}
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="API" icon="plug" href="/api-testing">
+    Write API tests in the same files and run as UI tests.
+  </Card>
+  <Card title="expect" icon="circle-check" href="/reference/expect">
+    Value matchers for a response's fields and body.
+  </Card>
+</CardGroup>

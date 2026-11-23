@@ -739,6 +739,72 @@ export interface RecordedVideoLink {
   readonly startedAt: string;
 }
 
+/**
+ * The `request` fixture: HTTP calls from a test. A path resolves against the
+ * app URL; an absolute http(s) URL goes where it names. Each call is a step,
+ * bounded by the action timeout and the running test's or hook's budget, and
+ * returns once the whole body is read. It does not send the browser's
+ * cookies or keep cookies between calls.
+ */
+export interface APIRequest {
+  /** Sends a request with `options.method`, GET by default. */
+  fetch(url: string, options?: APIRequestFetchOptions): Promise<APIResponse>;
+  /** Sends a GET request. */
+  get(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a POST request. */
+  post(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a PUT request. */
+  put(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a PATCH request. */
+  patch(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a DELETE request. */
+  delete(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+  /** Sends a HEAD request. */
+  head(url: string, options?: APIRequestOptions): Promise<APIResponse>;
+}
+
+/** What one `request` call sends beside its URL. */
+export interface APIRequestOptions {
+  /** Request headers. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** A body sent as JSON, with `content-type: application/json` unless `headers` sets one. Not with `body`. */
+  readonly json?: unknown;
+  /** A body sent as is. Not with `json`. */
+  readonly body?: string;
+}
+
+/** `request.fetch` options: the method beside the rest. */
+export interface APIRequestFetchOptions extends APIRequestOptions {
+  /** The HTTP method; GET by default. */
+  readonly method?: string;
+}
+
+/** A `request` call's response, its body already read. `expect(response).toBeOK()` checks its status. */
+export interface APIResponse extends Expectable<APIResponseExpectation> {
+  /** The URL the response came from, after redirects. */
+  readonly url: string;
+  /** The HTTP status code. */
+  readonly status: number;
+  /** The HTTP status text. */
+  readonly statusText: string;
+  /** Whether the status is 2xx. */
+  readonly ok: boolean;
+  /** Response headers, lower-cased names; several `set-cookie` values are joined with `\n`. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** The body as UTF-8 text. */
+  text(): Promise<string>;
+  /** The body parsed as JSON. */
+  json<T = unknown>(): Promise<T>;
+}
+
+/** `expect(response)` for a `request` response. */
+export interface APIResponseExpectation {
+  /** Inverts the matcher. */
+  readonly not: { toBeOK(): void };
+  /** Requires a 2xx status. */
+  toBeOK(): void;
+}
+
 export interface SetupSession {
   /** Saves state under a setup-declared name. */
   save(name: string): Promise<void>;
@@ -753,6 +819,8 @@ export interface TestFixtures {
   readonly screen: Screen;
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+  /** HTTP calls, each one a step; a path resolves against the app URL. */
+  readonly request: APIRequest;
 }
 
 export interface SetupFixtures extends TestFixtures {

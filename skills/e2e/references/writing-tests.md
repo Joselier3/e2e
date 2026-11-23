@@ -560,14 +560,13 @@ import { expect } from 'e2e';
 import { z } from 'zod';
 
 const projectTest = test.extend<{ project: { id: string } }>({
-  project: async ({ app, browser }, use) => {
+  project: async ({ browser, request }, use) => {
     const cookie = (await browser.cookies()).map((c) => `${c.name}=${c.value}`).join('; ');
-    const api = (path: string, init: RequestInit = {}) =>
-      fetch(`${app.baseUrl}${path}`, { ...init, headers: { cookie, 'content-type': 'application/json' } });
-    const created = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name: `Project ${Date.now()}` }) });
+    const created = await request.post('/api/projects', { json: { name: `Project ${Date.now()}` }, headers: { cookie } });
+    expect(created).toBeOK();
     const project = expect(await created.json()).toMatchSchema(z.object({ id: z.string() }));
     await use(project);
-    await api(`/api/projects/${project.id}`, { method: 'DELETE' }); // runs after a failure too
+    await request.delete(`/api/projects/${project.id}`, { headers: { cookie } }); // runs after a failure too
   },
 });
 
@@ -700,9 +699,10 @@ them. A predicate function is `INVALID_ARGUMENT`.
   `browser.locator('.btn-primary')`.
 - Test data gets a run-unique name (`Invoice ${Date.now()}`) and `afterEach`
   cleanup, so replays and retries never trip over leftovers.
-- APIs live in the same suite: ``fetch(`${app.baseUrl}/api/users`)``
-  plus value matchers, in a `test.extend` fixture that reads `browser.cookies()`
-  when the API needs the session.
+- APIs live in the same suite: `request.get('/api/users')` (each call a
+  step, a path against the app URL), `expect(response).toBeOK()`, and the
+  value matchers. `request` sends no browser cookies: pass
+  `browser.cookies()` in a `cookie` header when the API needs the session.
 - No sleeps, fixed delays, or polling loops. Wait for the state, not a
   duration: `agent.waitFor('the import finished')` with a `timeout` long
   enough for the slowest case (topic `agent` lists its model and budget

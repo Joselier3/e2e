@@ -31,6 +31,7 @@ test('checkout summary', async ({ screen }) => {
 | [`expect(locator, message?)`](#locator-matchers) | `AsyncExpectation` |
 | [`expect(screen, message?)`](#screenshot-matchers) | `ScreenExpectation` |
 | [`expect(fixture)`](#browser-matchers) | The engine's matcher set |
+| [`expect(response)`](#response-matchers) | `APIResponseExpectation` |
 | [`expect(value, message?)`](#value-matchers) | `ValueExpectation<T>` |
 | [`expect.poll(read, options?)`](#polling-a-value) | `PollExpectation<T>` |
 | [`expect(fn).toPass(options?)`](#retrying-a-block) | `Promise<void>` |
@@ -44,6 +45,8 @@ test('checkout summary', async ({ screen }) => {
   Such a fixture is an `Expectable<E>`: its engine attached the matcher set
   `E` through [`expectable`](/reference/engine#contributed-fixtures), and
   `expect(fixture)` returns it.
+- A [`request`](/reference/request) response gets
+  [`toBeOK`](#response-matchers).
 - Every other argument gets the value matchers, a promise included. Await a
   promise before passing its result to `expect`.
 
@@ -390,6 +393,27 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 - It reads the `class` attribute, so `''` matches `class=""` and not an
   element with no `class` attribute at all. Playwright's `toHaveClass('')`
   accepts both.
+
+### Response matchers
+
+A response from the [`request`](/reference/request) fixture has one
+matcher. Its body is already read, so the matcher checks at once and is
+not a step.
+
+| Matcher | Description |
+| --- | --- |
+| [`toBeOK`](#tobeok) | Requires a 2xx status |
+
+#### `toBeOK`
+
+Requires a 2xx status; `.not.toBeOK()` requires any other.
+
+```ts
+expect(await request.post('/api/orders', { json: { sku: 'A1' } })).toBeOK();
+```
+
+The failure names the call and the status. Check a field with the value
+matchers: `expect(response.status).toBe(201)`.
 
 ### Value matchers
 
