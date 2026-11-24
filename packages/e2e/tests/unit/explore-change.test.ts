@@ -149,15 +149,38 @@ describe('readExploreChange', () => {
     expect(brief).not.toContain('diff --git');
   });
 
-  it('cuts a large patch and lists files past the budget by counts only', async () => {
+  it('splits the patch budget evenly between large patches', async () => {
     const big = Array.from({ length: 2_000 }, (_, index) => `line ${index}`).join('\n');
     const files = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`f${String(index).padStart(2, '0')}.txt`, `${big}\n`]));
     const { dir } = branchWith({ 'a.txt': 'a\n' }, files);
     const { text: brief, complete } = await changeOf(dir);
     expect(complete).toBe(false);
-    expect(brief).toMatch(/f00\.txt \(\+2000 -0; patch cut, \d+ more lines\)/u);
-    expect(brief).toContain('f11.txt (+2000 -0; patch not shown)');
+    for (let index = 0; index < 12; index += 1) expect(brief).toMatch(new RegExp(`f${String(index).padStart(2, '0')}\\.txt \\(\\+2000 -0; patch cut, \\d+ more lines\\)\\n@@`, 'u'));
+    // The count left out covers the whole patch, its hunk header and 2000 lines, however many cuts it took.
+    const [, more, shown] = /f00\.txt \(\+2000 -0; patch cut, (\d+) more lines\)\n([^]*?)\nf01\.txt/u.exec(brief)!;
+    expect(Number(more) + shown!.split('\n').length).toBe(2_001);
     expect(Buffer.byteLength(brief)).toBeLessThan(12_000);
+  });
+
+  it('shows a short patch whole even when long patches come before it in path order', async () => {
+    const big = Array.from({ length: 2_000 }, (_, index) => `line ${index}`).join('\n');
+    const files = Object.fromEntries(Array.from({ length: 4 }, (_, index) => [`docs/f${index}.md`, `${big}\n`]));
+    const { dir } = branchWith({ 'src/cart.tsx': '<button>Remove</button>\n' }, { ...files, 'src/cart.tsx': '<button>Delete</button>\n' });
+    const brief = await briefOf(dir);
+    expect(brief).toContain('src/cart.tsx (+1 -1; full patch below)\n@@ -1 +1 @@\n-<button>Remove</button>\n+<button>Delete</button>');
+    for (let index = 0; index < 4; index += 1) expect(brief).toMatch(new RegExp(`docs/f${index}\\.md \\(\\+2000 -0; patch cut, \\d+ more lines\\)\\n@@`, 'u'));
+  });
+
+  it('gives the shortest of too many large patches a useful part each, and the rest their counts only', async () => {
+    const big = Array.from({ length: 200 }, (_, index) => `line ${index}`).join('\n');
+    const files = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`f${String(index).padStart(2, '0')}.txt`, `${big}\n${'x\n'.repeat(index)}`]));
+    const { dir } = branchWith({ 'a.txt': 'a\n' }, files);
+    const brief = await briefOf(dir);
+    expect(brief).toMatch(/f00\.txt \(\+200 -0; patch cut, \d+ more lines\)\n@@/u);
+    expect(brief).toContain('f29.txt (+229 -0; patch not shown)');
+    const shown = brief.split('\n').filter((line) => / \(\+\d+ -0; patch cut/u.test(line)).length;
+    expect(shown).toBeGreaterThan(10);
+    expect(shown).toBeLessThan(30);
   });
 
   it('says a patch with a line cut at its length is not the full patch', async () => {

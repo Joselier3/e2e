@@ -3,9 +3,10 @@
  * differ from where HEAD branched off the ref, as `run` measures them for its
  * test filters, read into a bounded brief the planner plans its charters
  * from and the explorer judges against. Files are listed with their line
- * counts while the list's budget lasts; patches of committed changes fill
- * the brief in path order until theirs is spent, and the commit messages
- * since the base say what the change is for. A file no commit changes is
+ * counts while the list's budget lasts; patches of committed changes share
+ * the brief's patch budget, the shortest first, so a long patch early in path
+ * order never crowds out the rest, and the commit messages since the base
+ * say what the change is for. A file no commit changes is
  * listed by name alone, its contents never read: CI may have written it,
  * credentials included; a committed file edited again in the working tree is
  * marked, its local edits never read. Every text git gives is redacted of the
@@ -41,8 +42,8 @@ const COMMIT_BYTES = 800;
 const MAX_COMMITS = 50;
 /** Patches read from git at the same time. */
 const PATCH_CONCURRENCY = 8;
-/** Below this many bytes left, a file gets its line counts only. */
-const MIN_PATCH_BYTES = 200;
+/** Bytes the shortest cut patch keeps: less is the hunk's leading context and little else, so the file gets its line counts only. */
+const MIN_PATCH_BYTES = 400;
 /** Bytes a file's line in the list may add to its path: the longest note `describe` writes, with room to spare. */
 const NOTE_BYTES = 96;
 /** One git call's output ceiling: past it, the file's patch is not shown. */
@@ -85,6 +86,12 @@ interface ChangedFile {
   readonly committed: { readonly lines: { readonly added: number; readonly removed: number } | undefined } | 'unknown' | undefined;
   /** Whether the working tree or the index changes it again after HEAD: those edits are not shown. */
   readonly dirty: boolean;
+}
+
+/** A file's patch as read: its leading lines within `FILE_PATCH_BYTES`, the most any share gives, and the whole patch's size, which orders the sharing. */
+interface ReadPatch {
+  readonly head: Patch;
+  readonly bytes: number;
 }
 
 interface Patch {
@@ -191,25 +198,24 @@ class GitReader {
   }
 
   /**
-   * Each committed file's patch, cut to fit, while the budget lasts. Files
-   * are read in their sorted order, a batch at a time, so the brief is the
-   * same on every run of the same change.
+   * Each committed file's patch, cut to its share of the budget. Every
+   * listed file's patch is read, a batch at a time, the fewest changed lines
+   * first, so a budget that runs out leaves out the largest; each is kept
+   * only as far as `FILE_PATCH_BYTES`, so a run of large patches never sits
+   * in memory whole. `sharePatches` then cuts them to their shares, so the
+   * brief is the same on every run of the same change.
    */
   async patches(base: string, files: readonly ChangedFile[]): Promise<Map<string, Patch>> {
-    const patches = new Map<string, Patch>();
-    const readable = files.filter((file) => typeof file.committed === 'object' && file.committed.lines !== undefined);
-    let left = PATCH_BUDGET_BYTES;
-    for (let start = 0; start < readable.length && left >= MIN_PATCH_BYTES; start += PATCH_CONCURRENCY) {
+    const read = new Map<string, ReadPatch>();
+    const readable = files
+      .filter((file) => typeof file.committed === 'object' && file.committed.lines !== undefined)
+      .toSorted((a, b) => changedLines(a) - changedLines(b));
+    for (let start = 0; start < readable.length; start += PATCH_CONCURRENCY) {
       const batch = readable.slice(start, start + PATCH_CONCURRENCY);
-      const read = await Promise.all(batch.map(async (file) => [file.file, await this.patch(base, file.file)] as const));
-      for (const [file, text] of read) {
-        if (text === undefined || left < MIN_PATCH_BYTES) continue;
-        const patch = cutLines(text, Math.min(FILE_PATCH_BYTES, left));
-        patches.set(file, patch);
-        left -= Buffer.byteLength(patch.text) + 1;
-      }
+      const texts = await Promise.all(batch.map(async (file) => [file.file, await this.patch(base, file.file)] as const));
+      for (const [file, text] of texts) if (text !== undefined) read.set(file, { head: cutLines(text, FILE_PATCH_BYTES), bytes: Buffer.byteLength(text) });
     }
-    return patches;
+    return sharePatches(read);
   }
 
   /**
@@ -252,6 +258,35 @@ function listedFiles(files: readonly ChangedFile[]): ChangedFile[] {
     left -= size;
   }
   return listed;
+}
+
+/**
+ * The patches cut to share `PATCH_BUDGET_BYTES`, the shortest first: each
+ * takes at most an even split of what is left, so the patches that fit whole
+ * stay whole, and what they leave goes to the longer ones, none past
+ * `FILE_PATCH_BYTES`. When too many long patches are left for each to get
+ * `MIN_PATCH_BYTES`, the shortest of them get that much while it lasts and
+ * the rest get none. Ties go by path, so the cut is the same on every run.
+ */
+function sharePatches(read: ReadonlyMap<string, ReadPatch>): Map<string, Patch> {
+  const order = [...read]
+    .map(([file, { head, bytes }]) => ({ file, head, bytes }))
+    .toSorted((a, b) => a.bytes - b.bytes || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  const patches = new Map<string, Patch>();
+  let left = PATCH_BUDGET_BYTES;
+  order.forEach(({ file, head }, index) => {
+    const share = Math.min(FILE_PATCH_BYTES, left, Math.max(MIN_PATCH_BYTES, Math.floor(left / (order.length - index))));
+    const cut = cutLines(head.text, share);
+    if (cut.text === '' || (head.cutLines + cut.cutLines > 0 && share < MIN_PATCH_BYTES)) return;
+    patches.set(file, { text: cut.text, cutLines: head.cutLines + cut.cutLines, cappedLines: head.cappedLines || cut.cappedLines });
+    left -= Buffer.byteLength(cut.text) + 1;
+  });
+  return patches;
+}
+
+/** The lines a commit adds and removes in `file`, which orders the patch reads. */
+function changedLines(file: ChangedFile): number {
+  return typeof file.committed === 'object' ? (file.committed.lines?.added ?? 0) + (file.committed.lines?.removed ?? 0) : 0;
 }
 
 /** Whole lines of `text` within `bytes`, each line capped, how many were left out, and whether one was capped. */
